@@ -1,6 +1,6 @@
 {
   "name": "file-converter",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "PDF·이미지·DICOM 파일 변환기 — 오프라인 데스크톱 앱 (여러 파일 드롭 → 변환 대상 감지 → 미리보기 → 변환). PDF 편집은 자매 프로젝트 pdf-editor 담당",
   "author": "이성현",
   "license": "UNLICENSED",

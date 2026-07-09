@@ -13,13 +13,14 @@ domain: development
 이 프로젝트의 문서는 **사람과 AI 에이전트(Claude Code)가 동시에 사용**한다는 전제로 쓴다.
 받는 사람(또는 AI)의 사전 지식을 가정하지 말고, 누가 받아도 바로 작업 가능한 형태를 목표로 한다.
 
-## ⚠️ 이 프로젝트의 결정적 차이: git 저장소가 아니다
+## ⚠️ 이 프로젝트의 이력 관리: session-log가 SSOT
 
-`cm_groupware`는 완료된 작업 이력을 **git history**에 맡기고 `todo.md`엔 미해결만 남긴다.
-**file-converter는 git 저장소가 아니다.** 따라서 그 "완료 이력" 역할을 `docs/session-log.md`가 대신한다.
+원래 git 저장소가 아니어서 `docs/session-log.md`가 git history를 대신했다.
+**2026-07-09부터 git 저장소가 됐지만**(커밋·푸시는 사용자가 직접), session-log의 SSOT 역할은 유지한다 —
+커밋은 사용자 재량 단위라 세션 서사(무엇을 왜, 어디까지)를 담보하지 못하고, CLAUDE.md 부팅 프로토콜이 이 파일을 전제한다.
 
-- **"무슨 일이 언제 있었나"의 SSOT = `docs/session-log.md`** (git log 대용).
-- `todo.md`는 그들과 동일하게 **미해결·향후 작업만** 담는다.
+- **"무슨 일이 언제 있었나"의 SSOT = `docs/session-log.md`**. git log는 보조.
+- `todo.md`는 cm_groupware와 동일하게 **미해결·향후 작업만** 담는다.
 - 세션이 끝날 때 반드시 `session-log.md` 최상단에 그 세션 블록을 추가한다.
 
 ## 폴더 구조
@@ -27,7 +28,7 @@ domain: development
 ```
 docs/
 ├── writing-guide.md      # 이 파일 (문서 작성 규칙)
-├── session-log.md        # 세션별 진행 이력 (git history 대용, 최신이 맨 위) — 진행상태 SSOT
+├── session-log.md        # 세션별 진행 이력 (최신이 맨 위) — 진행상태 SSOT
 ├── todo.md               # 미해결·향후 작업 (P1~P4)
 ├── changelog.md          # 배포/버전 단위 사람용 요약 (인스톨러 릴리스 노트)
 ├── adr/                  # 아키텍처 결정 기록

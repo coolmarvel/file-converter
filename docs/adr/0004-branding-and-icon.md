@@ -1,14 +1,15 @@
 ---
 title: ADR-0004 제작자 브랜딩 & 얼굴 원형 아이콘
 created: 2026-07-07
-status: accepted
+status: superseded
 ---
 
 # ADR-0004: 제작자 브랜딩 & 얼굴 원형 아이콘
 
 ## 상태
 
-Accepted
+Superseded by [ADR-0006](0006-neutral-icon-no-photo.md) (2026-07-09) — 얼굴 사진 사용 전면 중단,
+중립 아이콘으로 교체. 서명·이름 크레딧만 유지.
 
 ## 맥락
 

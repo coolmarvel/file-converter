@@ -10,6 +10,10 @@ status: accepted
 
 Accepted
 
+> **2026-07-09 갱신**: "git 저장소가 아니다"라는 전제가 바뀜 — git 도입됨(커밋·푸시는 사용자 직접).
+> 후속 과제로 미뤘던 git init이 실행된 것. 단 session-log의 진행 이력 SSOT 역할은 유지한다
+> (세션 서사 보존 + CLAUDE.md 부팅 프로토콜 전제). 아래 본문은 도입 당시 맥락 그대로 둔다.
+
 ## 맥락
 
 file-converter는 Claude Code를 주 개발 도구로 쓴다. 개발자(이성현)는 코드를 직접 읽지 않고

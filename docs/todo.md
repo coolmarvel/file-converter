@@ -1,13 +1,13 @@
 ---
 title: 미해결 사항 및 향후 작업
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-09
 ---
 
 # 미해결 사항 및 향후 작업
 
 현재 인지하지만 아직 처리하지 않은 것만 담는다. **완료된 작업 이력은 여기 남기지 않고
-`docs/session-log.md`에 보존한다**(이 프로젝트는 git 저장소가 아니므로 session-log가 git history 대용).
+`docs/session-log.md`에 보존한다**(git 도입 후에도 session-log가 진행 이력 SSOT — writing-guide 참고).
 
 ## 우선순위 기준
 
@@ -46,4 +46,4 @@ pdfguru 파리티 전체가 새 프로젝트로 승계됨 (session-log 세션 5,
 
 - **DICOM 미리보기**: 현재 미지원(`Preview`에서 dicom은 소스 없음).
 - **JPEG 품질 옵션 노출**: `canvasToBytes`의 quality(현재 0.92 고정)를 UI로.
-- **git 도입 검토**: 도입 시 완료 이력을 git history로 이전하고 session-log 역할 축소 가능 (ADR-0001 참고).
+- ~~git 도입 검토~~ → **2026-07-09 도입 완료**(사용자가 직접 커밋·푸시). session-log SSOT는 유지 (세션 6, writing-guide).

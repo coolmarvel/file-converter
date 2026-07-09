@@ -8,7 +8,7 @@ import { DropZone } from './components/DropZone'
 import { FileCard } from './components/FileCard'
 import { DicomForm } from './components/DicomForm'
 import { Preview, PreviewSource } from './components/Preview'
-import faceUrl from './assets/face.png'
+import appIconUrl from './assets/app-icon.png'
 import signUrl from './assets/sign.png'
 
 type Status = { kind: 'info' | 'ok' | 'err'; text: string } | null
@@ -155,7 +155,7 @@ export default function App(): JSX.Element {
   return (
     <div className="app">
       <header className="topbar">
-        <img src={faceUrl} className="brand-logo" alt="" />
+        <img src={appIconUrl} className="brand-logo" alt="" />
         <h1>파일 변환기</h1>
         <span className="sub">PDF · 이미지 · DICOM 변환 · 오프라인</span>
       </header>
@@ -257,7 +257,6 @@ export default function App(): JSX.Element {
       </div>
 
       <footer className="credit">
-        <img className="cred-face" src={faceUrl} alt="이성현" />
         <span className="cred-by">
           제작 · <b>이성현</b> · © 2026
         </span>

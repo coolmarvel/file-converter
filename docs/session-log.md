@@ -1,13 +1,36 @@
 ---
 title: 세션 진행 로그
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-09
 ---
 
 # 세션 진행 로그
 
-> **이 파일이 "무슨 일이 언제 있었나"의 SSOT다** (file-converter는 git 저장소가 아니므로 git history 대용).
+> **이 파일이 "무슨 일이 언제 있었나"의 SSOT다** (2026-07-09 git 도입 후에도 유지 — git log는 보조, writing-guide 참고).
 > 새 세션은 이 파일부터 읽는다. 세션마다 최상단에 블록을 추가한다. 형식: 날짜 / 한 일 / 현재 상태 / 다음.
+
+---
+
+## 2026-07-09 (세션 6) — 개인 사진 전면 제거, 중립 아이콘 교체 (v1.0.6)
+
+사용자 지시: "인스톨러·실행기에서 내 사진 다 지우고 부드러운 아이콘으로 교체.
+**앞으로 인스톨러/실행기에 내 사진 쓰지 말 것**" → 정책화 (ADR-0006, ADR-0004 supersede).
+
+**한 일**
+- `scripts/gen-branding-assets.js` 전면 재작성: 사진 원본 의존 제거. 코드로 그린 SVG
+  (파란 그라데이션 라운드 사각형 + 문서 + 순환 화살표)를 `@resvg/resvg-js`로 렌더.
+  ICO는 크기별(16~256) 개별 렌더 → 소형에서도 선명. 임시 의존성 `npm i --no-save @resvg/resvg-js png-to-ico jimp@0.22`
+  (**jimp v1은 구 API 비호환** — 반드시 0.22).
+- 재생성: `build/{icon.ico,icon.png,installerSidebar/Header,uninstallerSidebar}.bmp` — 인스톨러 화면은
+  아이콘+서명+크레딧만(사진 없음). 새 자산 `assets/app-icon.png`(앱 헤더 로고).
+- `App.tsx`: 헤더 로고 face→app-icon, 푸터 얼굴 아바타 제거(이름·서명·© 유지). `face.png` 삭제,
+  `styles.css`에서 `.cred-face`·로고 원형 클립 제거. sign.png(서명 워터마크 기능)는 불변.
+- 검증: typecheck ✅ / test ✅ / build ✅ → **v1.0.6 인스톨러 바탕화면 교체**.
+- **git 운영 시작**: 사용자가 직접 커밋·푸시하기로 함(Claude는 요청 없이 커밋 안 함). `.gitignore`에
+  `*.tsbuildinfo` 추가 + 기존 `tsconfig.web.tsbuildinfo` untrack(`git rm --cached`). "git 저장소 아님"
+  전제의 문서들(CLAUDE.md·writing-guide·todo·ADR-0001·이 파일 헤더) 일괄 갱신 — **session-log SSOT는 유지**.
+
+**현재 상태**: 앱·인스톨러 어디에도 얼굴 사진 없음. 사용자 설치·확인 대기. v1.0.6 커밋/푸시는 사용자가 진행 예정.
 
 ---
 

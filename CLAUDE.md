@@ -7,7 +7,7 @@
 
 새 세션에서 이 프로젝트 작업을 시작하면, **코드를 건드리기 전에** 순서대로:
 
-1. `docs/session-log.md` 읽기 — 마지막으로 무엇을 했고 지금 어디쯤인지 (**진행 이력 SSOT**, git history 대용)
+1. `docs/session-log.md` 읽기 — 마지막으로 무엇을 했고 지금 어디쯤인지 (**진행 이력 SSOT**)
 2. `docs/todo.md` 읽기 — 남은 일 (P1~P4)
 3. 최근 `docs/plans/*.md` 1개 읽기 — 진행 중 기능의 설계 의도
 4. **프로젝트 루트에 `스크린샷 *.png` 가 있는지 확인** — 있으면 그것이 사용자의 **새(미처리) 피드백**이다.
@@ -63,14 +63,16 @@ PDF·이미지·DICOM을 **오프라인에서** 상호 변환하는 Electron 데
 | 파일 | 용도 |
 |---|---|
 | `docs/writing-guide.md` | **문서 지배 규칙** (SSOT·frontmatter·코드 1:1 대조). 문서 쓰기 전 필독 |
-| `docs/session-log.md` | 세션별 진행 이력. **"언제 무슨 일" SSOT** (git history 대용, 최신이 위) |
+| `docs/session-log.md` | 세션별 진행 이력. **"언제 무슨 일" SSOT** (최신이 위) |
 | `docs/todo.md` | 미해결·향후 작업만 (P1~P4). 완료분은 session-log로 |
 | `docs/changelog.md` | 인스톨러 릴리스 단위 사람용 요약 |
 | `docs/adr/*.md` | 구조적 결정 기록 (`0000-template.md` 형식). 왜 이렇게 했는가 |
 | `docs/plans/*.md` | 기능 단위 구현 계획 (`YYYY-MM-DD-*`) |
 | `docs/guides/*.md` | 기능별 현재 동작·코드 위치 (`conversion.md`, `watermark.md`) |
 
-**주의**: 이 프로젝트는 git 저장소가 아니다 → 완료 이력의 SSOT는 `session-log.md`. 코드/문서 변경 시 여기 갱신을 빠뜨리지 말 것.
+**주의**: 2026-07-09부터 **git 저장소가 됐다**(커밋·푸시는 사용자가 직접 한다 — Claude는 요청 없이 커밋하지 않는다).
+다만 세션 단위 맥락(무엇을 왜 했고 어디까지 왔나)의 SSOT는 계속 `session-log.md`다 — 커밋 메시지보다 서사가 상세하고,
+부팅 프로토콜이 이 파일을 전제한다. 코드/문서 변경 시 여기 갱신을 빠뜨리지 말 것.
 
 ## 자주 쓰는 명령
 
@@ -94,7 +96,8 @@ npm run dist:win     # → release/파일변환기-Setup-<version>.exe
 - 설치 브랜딩/아이콘: `build/{icon.ico,icon.png,installerSidebar.bmp,installerHeader.bmp,uninstallerSidebar.bmp,license.txt}` + `package.json`(nsis, extraResources) + `src/main/index.ts`(BrowserWindow icon). 결정 ADR-0005.
 - 변환 가능 경로 레지스트리(순수 TS): `src/core/conversions.ts`
 - 형식 감지(매직 바이트): `src/core/fileTypes.ts`
-- 제작자 브랜딩 자산: `src/renderer/src/assets/{face.png,sign.png}`, 앱 아이콘: `build/icon.{ico,png}`.
-  재생성 스크립트 `scripts/gen-branding-assets.js`(jimp 임시설치, 원본 = `C:\Users\user\Desktop\이성현`). 결정 ADR-0004.
+- 브랜딩 자산: `src/renderer/src/assets/{app-icon.png,sign.png}`, 앱 아이콘: `build/icon.{ico,png}`.
+  재생성 스크립트 `scripts/gen-branding-assets.js`(SVG→resvg 렌더. `npm i --no-save @resvg/resvg-js png-to-ico jimp@0.22` 임시설치 — jimp v1은 API 비호환). 결정 ADR-0006.
+  **🚫 사용자 얼굴 사진은 아이콘·인스톨러·앱 UI 어디에도 절대 넣지 않는다** (2026-07-09 사용자 지시, ADR-0006). 서명(sign.png)·이름 크레딧은 유지.
 
 **새 변환 추가** = `core/conversions.ts`의 `targetsFor` + `convert/index.ts` 디스패처, 두 곳만.
