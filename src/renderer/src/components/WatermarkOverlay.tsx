@@ -65,5 +65,6 @@ export function WatermarkOverlay({ wm }: { wm: WatermarkOpts }): JSX.Element | n
   }, [box, wm, sig])
 
   if (!wm.enabled) return null
-  return <canvas ref={ref} className="wm-overlay" style={{ width: '100%', height: '100%' }} />
+  // styles.css 제거 후 위치 지정은 인라인으로 (미리보기 프레임 위 장식 레이어)
+  return <canvas ref={ref} style={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none', width: '100%', height: '100%' }} />
 }

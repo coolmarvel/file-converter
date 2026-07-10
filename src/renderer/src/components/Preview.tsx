@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import Box from '@mui/material/Box'
+import Stack from '@mui/material/Stack'
+import Typography from '@mui/material/Typography'
+import IconButton from '@mui/material/IconButton'
+import Button from '@mui/material/Button'
+import Tooltip from '@mui/material/Tooltip'
+import RemoveRounded from '@mui/icons-material/RemoveRounded'
+import AddRounded from '@mui/icons-material/AddRounded'
+import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
+import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
+import FitScreenRounded from '@mui/icons-material/FitScreenRounded'
 import { openPdf, PdfHandle } from '../convert/pdf'
 import { blobPart } from '../convert/image'
 import { WatermarkOpts } from '../watermark/model'
 import { WatermarkOverlay } from './WatermarkOverlay'
+import { ui } from '../theme'
 
 /**
  * 미리보기 소스.
@@ -132,54 +144,98 @@ export function Preview({ source, watermark }: { source: PreviewSource; watermar
   }, [])
 
   if (!source || count === 0) {
-    return <p className="hint">파일을 선택하면 미리보기가 표시됩니다. (DICOM은 미지원)</p>
+    return (
+      <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Typography variant="caption" color="text.secondary">
+          파일을 선택하면 미리보기가 표시됩니다. (DICOM은 미지원)
+        </Typography>
+      </Box>
+    )
   }
 
   const frameW = stageW > 0 ? Math.max(80, Math.round(stageW * zoom)) : undefined
 
   return (
-    <div className="preview">
-      <div className="preview-toolbar">
-        <button className="iconbtn" title="축소" disabled={zoom <= 0.4} onClick={() => setZoom((z) => Math.max(0.4, +(z - 0.2).toFixed(2)))}>
-          −
-        </button>
-        <span className="zoomlabel">{Math.round(zoom * 100)}%</span>
-        <button className="iconbtn" title="확대" disabled={zoom >= 4} onClick={() => setZoom((z) => Math.min(4, +(z + 0.2).toFixed(2)))}>
-          ＋
-        </button>
-        <button className="iconbtn fitbtn" title="너비 맞춤" onClick={() => setZoom(1)}>
-          맞춤
-        </button>
-      </div>
-      <div className="preview-stage" ref={setStage}>
-        {url ? (
-          <div className="preview-frame" style={{ width: frameW }}>
-            <img src={url} alt="미리보기" />
-            {loading && <div className="preview-loading-badge">불러오는 중…</div>}
-            {watermark?.enabled && <WatermarkOverlay wm={watermark} />}
-          </div>
-        ) : (
-          <div className="preview-loading">불러오는 중…</div>
-        )}
-      </div>
-      {count > 1 && (
-        <div className="preview-nav">
-          <button className="iconbtn" title="이전 페이지" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
-            ‹
-          </button>
-          <span className="preview-count">
-            {page + 1} / {count}
+    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <Stack direction="row" alignItems="center" spacing={0.6}>
+        <Tooltip title="축소">
+          <span>
+            <IconButton size="small" disabled={zoom <= 0.4} onClick={() => setZoom((z) => Math.max(0.4, +(z - 0.2).toFixed(2)))}>
+              <RemoveRounded fontSize="small" />
+            </IconButton>
           </span>
-          <button
-            className="iconbtn"
-            title="다음 페이지"
-            disabled={page >= count - 1}
-            onClick={() => setPage((p) => Math.min(count - 1, p + 1))}
-          >
-            ›
-          </button>
-        </div>
+        </Tooltip>
+        <Typography variant="caption" sx={{ minWidth: 42, textAlign: 'center', color: ui.gray[600] }}>
+          {Math.round(zoom * 100)}%
+        </Typography>
+        <Tooltip title="확대">
+          <span>
+            <IconButton size="small" disabled={zoom >= 4} onClick={() => setZoom((z) => Math.min(4, +(z + 0.2).toFixed(2)))}>
+              <AddRounded fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="너비 맞춤">
+          <Button size="small" color="inherit" startIcon={<FitScreenRounded />} onClick={() => setZoom(1)} sx={{ px: 1, minWidth: 0 }}>
+            맞춤
+          </Button>
+        </Tooltip>
+      </Stack>
+
+      <Box
+        ref={setStage}
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          textAlign: 'center',
+          bgcolor: ui.gray[100],
+          border: `1px solid ${ui.gray[200]}`,
+          borderRadius: 2,
+          p: 1
+        }}
+      >
+        {url ? (
+          <Box sx={{ position: 'relative', display: 'inline-block', lineHeight: 0, verticalAlign: 'top', maxWidth: 'none', width: frameW }}>
+            <Box component="img" src={url} alt="미리보기" sx={{ width: '100%', height: 'auto', display: 'block', borderRadius: 1, boxShadow: ui.shadow.sm }} />
+            {loading && (
+              <Typography
+                variant="caption"
+                sx={{ position: 'absolute', top: 10, left: 10, zIndex: 4, bgcolor: 'rgba(255,255,255,.85)', borderRadius: 1, px: 0.8, py: 0.2, color: ui.gray[600] }}
+              >
+                불러오는 중…
+              </Typography>
+            )}
+            {watermark?.enabled && <WatermarkOverlay wm={watermark} />}
+          </Box>
+        ) : (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', pt: 4 }}>
+            불러오는 중…
+          </Typography>
+        )}
+      </Box>
+
+      {count > 1 && (
+        <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.6}>
+          <Tooltip title="이전 페이지">
+            <span>
+              <IconButton size="small" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                <ChevronLeftRounded />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Typography variant="caption" sx={{ minWidth: 56, textAlign: 'center', color: ui.gray[600] }}>
+            {page + 1} / {count}
+          </Typography>
+          <Tooltip title="다음 페이지">
+            <span>
+              <IconButton size="small" disabled={page >= count - 1} onClick={() => setPage((p) => Math.min(count - 1, p + 1))}>
+                <ChevronRightRounded />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Stack>
       )}
-    </div>
+    </Box>
   )
 }

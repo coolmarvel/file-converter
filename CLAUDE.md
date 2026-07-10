@@ -38,7 +38,7 @@
 - **PATCH**(1.0.**X**) — **기본값**. 수정/기능 하나 반영할 때마다 +1 (1.0.0 → 1.0.1 → 1.0.2 …).
 - **MINOR**(1.**X**.0) — 큰 기능 묶음을 한 번에 낼 때(판단). PATCH는 0으로.
 - **MAJOR**(**X**.0.0) — 대규모 재설계/호환 깨짐. 사용자와 상의.
-- 현재: **1.0.4** (사용자 확인 완료).
+- 현재: **1.1.0** (2026-07-10 UI 개편, 사용자가 1.1.x 선언 — 설치 확인 대기).
 - ~~pdfguru 편집기 전체 구현 로드맵~~ → **2026-07-08 새 프로젝트 `/home/jace/pdf-editor` 로 분리·승계**
   (session-log 세션 5 참조). 이 프로젝트는 변환기로 유지, PDF 편집 요청은 pdf-editor에서 작업.
 - 매번 `package.json` version 올리고 → 인스톨러 파일명·changelog·session-log에 반영.
@@ -88,8 +88,9 @@ npm run dist:win     # → release/파일변환기-Setup-<version>.exe
 
 ## 코드 지도 (수정 시 어디를 보나)
 
-- 화면 상태·흐름: `src/renderer/src/App.tsx` (편집 툴바 `EditorControls` 포함)
-- UI 조각: `src/renderer/src/components/` (DropZone, FileCard=순서변경, DicomForm, Preview, WatermarkOverlay)
+- 화면 상태·흐름: `src/renderer/src/App.tsx` (상태·핸들러 SSOT + 셸 레이아웃)
+- **디자인 시스템**: `src/renderer/src/theme.ts` — pdf-editor에서 이식한 MUI 테마(v1.1.0~). 브랜드 색만 파랑(#3b74f2), 나머지 토큰은 두 앱 공통. CSS 파일 없음(테마+sx 일원화)
+- UI 조각: `src/renderer/src/components/` — `TopBar`(타이틀+변환 버튼), `ConvertToolbar`(변환 대상 선택 툴바), `OptionsBar`(컨텍스트 툴바: 해상도/크기/DICOM/워터마크 옵션), `bar.tsx`(컨텍스트 바 공용 부품), `FileSidebar`(좌측 파일 목록·순서변경), DropZone, DicomForm(팝오버용), Preview, WatermarkOverlay
 - 실제 변환 구현(canvas/pdf.js): `src/renderer/src/convert/` (image, pdf, dicom, index=디스패처)
 - ~~PDF 주석 편집~~ → v1.0.5에서 제거, `~/pdf-editor` 프로젝트로 이관
 - 워터마크 모델·렌더: `src/renderer/src/watermark/model.ts` (guides/watermark.md). 변환 계층 3경로에 주입.

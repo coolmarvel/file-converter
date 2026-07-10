@@ -1,13 +1,45 @@
 ---
 title: 세션 진행 로그
 created: 2026-07-07
-updated: 2026-07-09
+updated: 2026-07-10
 ---
 
 # 세션 진행 로그
 
 > **이 파일이 "무슨 일이 언제 있었나"의 SSOT다** (2026-07-09 git 도입 후에도 유지 — git log는 보조, writing-guide 참고).
 > 새 세션은 이 파일부터 읽는다. 세션마다 최상단에 블록을 추가한다. 형식: 날짜 / 한 일 / 현재 상태 / 다음.
+
+---
+
+## 2026-07-10 (세션 7) — UI 전면 개편: pdf-editor 디자인 시스템 이식 (v1.1.0)
+
+사용자 지시: "파일변환기 UI가 구리다. pdf-editor처럼 하고 싶다. UI만 긁어와서 기존 기능에
+충돌 안 나게. 옵션은 우측 사이드바가 아니라 툴바/컨텍스트 툴바로. 버전은 1.1.x로."
+(참고: 이 레포는 이번 세션에 GitHub `coolmarvel/file-converter` 에서 `~/file-converter` 로 재클론됨.)
+
+**한 일**
+- **MUI 도입**: `@mui/material` + `@mui/icons-material` + emotion (pdf-editor와 동일 v6 계열).
+  `theme.ts`를 pdf-editor에서 이식하되 **브랜드 색만 기존 파랑 #3b74f2 스케일로 교체**
+  (그레이·섀도·라운드·컴포넌트 오버라이드는 두 앱 공통 규칙). `styles.css` 삭제 — 스타일은 테마+sx 일원화.
+- **레이아웃 재구성** (pdf-editor Editor 셸 문법: 상단 3단 바 + 본문):
+  - `TopBar.tsx` — 앱 아이덴티티 + 우측 [N개 변환 후 저장] 알약 버튼(+진행 스피너).
+  - `ConvertToolbar.tsx` — 76×48 ToolBtn 규격. 파일 목록 토글·파일 추가 + **변환 대상 선택**("PNG →" 라벨 뒤 대상들).
+  - `OptionsBar.tsx` — **컨텍스트 툴바(52px 고정)**. 대상에 따라 해상도(PDF)/출력 크기(이미지)/
+    환자 정보 팝오버(DICOM, 필수 누락 시 error 톤)/워터마크(토글 칩 → 종류·문구·팔레트·배치·크기·진하기·간격·기울기) 노출.
+    공용 부품은 `bar.tsx` (Group/GDivider/BarInput/PaletteControl/SliderControl — SubToolbar 규약 이식).
+  - `FileSidebar.tsx` — 파일 목록을 좌측 사이드바(296px)로 이동. 구 `FileCard.tsx` 삭제(내부로 흡수).
+  - `DropZone.tsx` — 파일 없을 때 본문 전체 랜딩형으로 개편. 본문 어디든 드래그&드롭 가능(App에서 처리).
+  - `Preview.tsx` — **로직 무수정**(렌더 세대·PDF 캐시·URL 소유권 규칙 그대로), 표현만 MUI로.
+    `WatermarkOverlay`는 className→인라인 스타일만 변경.
+  - 상태 메시지는 `.status` div → **Snackbar/Alert** (err는 수동 닫기, 나머지 5초 자동).
+- **불변 경계 준수**: `core/`, `convert/`, `watermark/model.ts`, main/preload IPC, `runConversion` 시그니처,
+  App의 상태·핸들러(addFiles/removeFile/moveFile/handleConvert/previewSource) 전부 무수정.
+- 검증: typecheck ✅ / test 6/6 ✅ / build ✅ + **Playwright 실 Electron 시각 검증**
+  (랜딩/이미지 로드/워터마크 전개/DICOM 팝오버 4장 — pdf-editor의 playwright-core 차용, 스크립트는 scratchpad 1회용).
+- v1.0.6 → **v1.1.0** (사용자가 1.1.x 선언).
+
+**현재 상태**: 새 UI 동작 확인 완료, 인스톨러 굽는 중. 커밋/푸시는 사용자가 직접.
+**다음**: 사용자 설치 테스트 → 스크린샷 피드백. 기능 확장 후보(사용자 논의): 이미지 압축(품질 옵션) → 배경 제거 → DICOM 익명화.
 
 ---
 

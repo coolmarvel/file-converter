@@ -1,22 +1,27 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, DragEvent } from 'react'
+import Box from '@mui/material/Box'
+import Stack from '@mui/material/Stack'
+import Typography from '@mui/material/Typography'
+import Snackbar from '@mui/material/Snackbar'
+import Alert from '@mui/material/Alert'
 import { detectFileKind, targetsFor, FileKind, FORMATS } from '@core/index'
 import { AppFile } from './types'
 import { runConversion } from './convert'
 import { DicomMeta } from './convert/dicom'
-import { WatermarkOpts, DEFAULT_WATERMARK, WmLayout } from './watermark/model'
+import { WatermarkOpts, DEFAULT_WATERMARK } from './watermark/model'
+import TopBar from './components/TopBar'
+import ConvertToolbar from './components/ConvertToolbar'
+import OptionsBar from './components/OptionsBar'
+import FileSidebar from './components/FileSidebar'
 import { DropZone } from './components/DropZone'
-import { FileCard } from './components/FileCard'
-import { DicomForm } from './components/DicomForm'
 import { Preview, PreviewSource } from './components/Preview'
-import appIconUrl from './assets/app-icon.png'
+import { ui } from './theme'
 import signUrl from './assets/sign.png'
 
 type Status = { kind: 'info' | 'ok' | 'err'; text: string } | null
 
 const EMPTY_DICOM: DicomMeta = { patientName: '', patientID: '', patientSex: '', modality: 'OT' }
 let idSeq = 0
-
-const PEN_COLORS = ['#111111', '#e53935', '#1e88e5', '#2e7d32', '#fbc02d']
 
 export default function App(): JSX.Element {
   const [files, setFiles] = useState<AppFile[]>([])
@@ -29,6 +34,8 @@ export default function App(): JSX.Element {
   const [wm, setWm] = useState<WatermarkOpts>(DEFAULT_WATERMARK)
   const [status, setStatus] = useState<Status>(null)
   const [busy, setBusy] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const commonKind = useMemo<FileKind | 'mixed' | null>(() => {
     if (files.length === 0) return null
@@ -152,197 +159,107 @@ export default function App(): JSX.Element {
     }
   }
 
-  return (
-    <div className="app">
-      <header className="topbar">
-        <img src={appIconUrl} className="brand-logo" alt="" />
-        <h1>파일 변환기</h1>
-        <span className="sub">PDF · 이미지 · DICOM 변환 · 오프라인</span>
-      </header>
+  const openPicker = (): void => fileInputRef.current?.click()
 
-      <div className="main">
-        <section className="left">
-          <DropZone onFiles={addFiles} />
-          <div className="panel preview-panel">
-            <h2>미리보기</h2>
+  // 파일이 이미 있어도 본문 어디에나 끌어다 놓으면 추가되도록 (랜딩 드롭존과 별개)
+  const handleDrop = (e: DragEvent): void => {
+    e.preventDefault()
+    if (e.dataTransfer.files.length) void addFiles(Array.from(e.dataTransfer.files))
+  }
+
+  return (
+    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <TopBar busy={busy} fileCount={files.length} canConvert={!!target && files.length > 0} onConvert={() => void handleConvert()} />
+      <ConvertToolbar
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        onAddFiles={openPicker}
+        commonKind={commonKind}
+        targets={targets}
+        target={target}
+        onTarget={setTarget}
+      />
+      <OptionsBar
+        commonKind={commonKind}
+        targets={targets}
+        target={target}
+        activeTarget={activeTarget}
+        targetIsImage={targetIsImage}
+        scale={scale}
+        onScale={setScale}
+        resizeW={resizeW}
+        resizeH={resizeH}
+        onResizeW={setResizeW}
+        onResizeH={setResizeH}
+        dicomMeta={dicomMeta}
+        onDicomMeta={setDicomMeta}
+        wm={wm}
+        onWm={setWm}
+      />
+
+      <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        {sidebarOpen && (
+          <FileSidebar files={files} activeId={activeId} onSelect={setActiveId} onRemove={removeFile} onMove={moveFile} onAddFiles={openPicker} />
+        )}
+        <Box
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          sx={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', bgcolor: 'background.default', p: 2 }}
+        >
+          {files.length === 0 ? (
+            <DropZone onFiles={(f) => void addFiles(f)} />
+          ) : (
             <Preview source={previewSource} watermark={target && target !== 'dicom' && wm.enabled ? wm : undefined} />
-          </div>
-        </section>
+          )}
+        </Box>
+      </Box>
 
-        <aside className="right">
-          <div className="panel filelist-panel">
-            <h2>파일 {files.length > 0 && <span className="count-badge">{files.length}</span>}</h2>
-            <div className="filelist">
-              {files.length === 0 && <p className="empty">아직 추가된 파일이 없습니다.</p>}
-              {files.map((f, i) => (
-                <FileCard
-                  key={f.id}
-                  file={f}
-                  index={i}
-                  active={f.id === activeId}
-                  canMoveUp={i > 0}
-                  canMoveDown={i < files.length - 1}
-                  onSelect={() => setActiveId(f.id)}
-                  onRemove={() => removeFile(f.id)}
-                  onMoveUp={() => moveFile(f.id, -1)}
-                  onMoveDown={() => moveFile(f.id, 1)}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="panel convert-panel">
-            <h2>변환</h2>
-
-            <>
-                {commonKind === null && <p className="hint">파일을 추가하면 변환 옵션이 나타납니다.</p>}
-                {commonKind === 'mixed' && <p className="hint">같은 종류의 파일끼리만 함께 변환할 수 있어요. 종류가 섞여 있습니다.</p>}
-                {commonKind && commonKind !== 'mixed' && targets.length === 0 && (
-                  <p className="hint">{FORMATS[commonKind].label} 은(는) 현재 버전에서 변환 대상이 없습니다.</p>
-                )}
-
-                {targets.length > 0 && (
-                  <>
-                    <div className="targetgrid">
-                      {targets.map((t) => (
-                        <div key={t.to} className={`target${target === t.to ? ' on' : ''}`} onClick={() => setTarget(t.to)}>
-                          <span>{target === t.to ? '●' : '○'}</span> {t.label}
-                        </div>
-                      ))}
-                    </div>
-
-                    {commonKind === 'pdf' && (
-                      <label className="field">
-                        <span>해상도</span>
-                        <select value={scale} onChange={(e) => setScale(Number(e.target.value))}>
-                          <option value={1.5}>보통 (1.5x)</option>
-                          <option value={2}>선명 (2x)</option>
-                          <option value={3}>고화질 (3x)</option>
-                        </select>
-                      </label>
-                    )}
-
-                    {targetIsImage && (
-                      <div className="optbox">
-                        <div className="optbox-title">크기 (px) — 비우면 원본 유지</div>
-                        <div className="size-row">
-                          <label className="field size-field">
-                            <span>가로</span>
-                            <input type="number" min={1} placeholder="자동" value={resizeW} onChange={(e) => setResizeW(e.target.value)} />
-                          </label>
-                          <span className="size-x">×</span>
-                          <label className="field size-field">
-                            <span>세로</span>
-                            <input type="number" min={1} placeholder="자동" value={resizeH} onChange={(e) => setResizeH(e.target.value)} />
-                          </label>
-                        </div>
-                        <p className="hint" style={{ marginTop: 6 }}>한쪽만 입력하면 비율을 유지해요.</p>
-                      </div>
-                    )}
-
-                    {activeTarget?.needs === 'dicomMeta' && <DicomForm meta={dicomMeta} onChange={setDicomMeta} />}
-
-                    {target !== 'dicom' && <WatermarkControls wm={wm} onChange={setWm} />}
-
-                    <button className="btn" disabled={busy || !target} onClick={handleConvert}>
-                      {busy ? '변환 중…' : `${files.length}개 파일 변환 후 저장`}
-                    </button>
-                  </>
-                )}
-            </>
-
-            {status && <div className={`status ${status.kind}`}>{status.text}</div>}
-          </div>
-        </aside>
-      </div>
-
-      <footer className="credit">
-        <span className="cred-by">
+      <Stack
+        direction="row"
+        alignItems="center"
+        spacing={1}
+        sx={{ px: 2, py: 0.4, borderTop: 1, borderColor: 'divider', bgcolor: '#fff', flexShrink: 0 }}
+      >
+        <Typography variant="caption" sx={{ color: ui.gray[500] }}>
           제작 · <b>이성현</b> · © 2026
-        </span>
-        <img className="cred-sign" src={signUrl} alt="이성현 서명" />
-        <span className="cred-note">오프라인 동작 · 원본 파일은 수정하지 않습니다</span>
-      </footer>
-    </div>
-  )
-}
+        </Typography>
+        <Box component="img" src={signUrl} alt="이성현 서명" sx={{ height: 16, opacity: 0.8 }} />
+        <Box sx={{ flex: 1 }} />
+        <Typography variant="caption" sx={{ color: ui.gray[400] }}>
+          오프라인 동작 · 원본 파일은 수정하지 않습니다
+        </Typography>
+      </Stack>
 
-// ── 워터마크 옵션 ─────────────────────────────────────
-function WatermarkControls({ wm, onChange }: { wm: WatermarkOpts; onChange: (w: WatermarkOpts) => void }): JSX.Element {
-  const set = (patch: Partial<WatermarkOpts>) => onChange({ ...wm, ...patch })
-  const layouts: { key: WmLayout; label: string }[] = [
-    { key: 'diagonal', label: '대각선' },
-    { key: 'tile', label: '바둑판' },
-    { key: 'corner', label: '모서리' }
-  ]
-  return (
-    <div className="optbox wmbox">
-      <label className="edittoggle" style={{ margin: 0, background: 'transparent', padding: 0 }}>
-        <input type="checkbox" checked={wm.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
-        <span>💧 워터마크 넣기</span>
-      </label>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        accept=".pdf,.png,.jpg,.jpeg,.webp,.dcm,.dicom"
+        onChange={(e) => {
+          if (e.target.files) void addFiles(Array.from(e.target.files))
+          e.target.value = ''
+        }}
+      />
 
-      {wm.enabled && (
-        <div style={{ marginTop: 10 }}>
-          <div className="toolrow" style={{ gridTemplateColumns: '1fr 1fr', marginBottom: 10 }}>
-            <button className={`toolbtn${wm.type === 'text' ? ' on' : ''}`} onClick={() => set({ type: 'text' })}>
-              텍스트
-            </button>
-            <button className={`toolbtn${wm.type === 'signature' ? ' on' : ''}`} onClick={() => set({ type: 'signature' })}>
-              내 서명
-            </button>
-          </div>
-
-          {wm.type === 'text' && (
-            <label className="field">
-              <span>문구</span>
-              <input value={wm.text} onChange={(e) => set({ text: e.target.value })} placeholder="예: 이성현 · 대외비" />
-            </label>
-          )}
-
-          <label className="field">
-            <span>배치</span>
-            <div className="toolrow" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
-              {layouts.map((l) => (
-                <button key={l.key} className={`toolbtn${wm.layout === l.key ? ' on' : ''}`} onClick={() => set({ layout: l.key })}>
-                  {l.label}
-                </button>
-              ))}
-            </div>
-          </label>
-
-          {wm.type === 'text' && (
-            <div className="swatches" style={{ marginTop: 10 }}>
-              {PEN_COLORS.map((c) => (
-                <button key={c} className={`swatch${wm.color === c ? ' on' : ''}`} style={{ background: c }} onClick={() => set({ color: c })} title={c} />
-              ))}
-              <input type="color" value={wm.color} onChange={(e) => set({ color: e.target.value })} className="colorpick" title="직접 선택" />
-            </div>
-          )}
-
-          <label className="field">
-            <span>크기 ({wm.sizePct}%)</span>
-            <input type="range" min={5} max={60} value={wm.sizePct} onChange={(e) => set({ sizePct: Number(e.target.value) })} />
-          </label>
-          <label className="field">
-            <span>진하기 ({Math.round(wm.opacity * 100)}%)</span>
-            <input type="range" min={0.05} max={1} step={0.05} value={wm.opacity} onChange={(e) => set({ opacity: Number(e.target.value) })} />
-          </label>
-          {wm.layout === 'tile' && (
-            <label className="field">
-              <span>간격 ({wm.gapPct}%)</span>
-              <input type="range" min={5} max={120} step={5} value={wm.gapPct} onChange={(e) => set({ gapPct: Number(e.target.value) })} />
-            </label>
-          )}
-          {wm.layout !== 'corner' && (
-            <label className="field">
-              <span>기울기 ({wm.rotationDeg}°)</span>
-              <input type="range" min={-90} max={90} step={5} value={wm.rotationDeg} onChange={(e) => set({ rotationDeg: Number(e.target.value) })} />
-            </label>
-          )}
-          <p className="hint">미리보기에 실시간 표시돼요. DICOM 대상에는 적용되지 않고, 변환 결과물에만 찍힙니다.</p>
-        </div>
-      )}
-    </div>
+      <Snackbar
+        open={!!status}
+        autoHideDuration={status?.kind === 'err' ? null : 5000}
+        onClose={(_, reason) => {
+          if (reason === 'clickaway') return
+          setStatus(null)
+        }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          severity={status?.kind === 'ok' ? 'success' : status?.kind === 'err' ? 'error' : 'info'}
+          variant="filled"
+          onClose={() => setStatus(null)}
+          sx={{ boxShadow: ui.shadow.lg }}
+        >
+          {status?.text}
+        </Alert>
+      </Snackbar>
+    </Box>
   )
 }
