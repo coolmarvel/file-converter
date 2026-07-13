@@ -11,6 +11,35 @@ updated: 2026-07-13
 
 ---
 
+## 2026-07-13 (세션 8-h) — 설치본 난독화 + 전체 기능 회귀 E2E 24종 (v1.3.2)
+
+사용자: "설치 파일에 난독화 기능까지 넣고 한 번 더 전체 기능 테스트. pdf-editor랑 project-seed 참고."
+
+**한 일**
+- **난독화 파이프라인 이식** (`~/pdf-editor/scripts/obfuscate.cjs` + `~/project-seed/guides/desktop-packaging.md` §배포 소스 보호):
+  - `scripts/obfuscate.cjs` 신설, `javascript-obfuscator` devDep 추가. `npm run build` =
+    electron-vite build + 난독화 → 모든 `pack:*`/`dist:*`가 자동 경유.
+  - 보수 설정(식별자 hex + 문자열 배열 0.6만 ON, controlFlowFlattening 등 OFF). **bytecodePlugin 금지**
+    (pdf-editor v1.4.2 사고 — WSL 빌드 exe가 Windows에서 cachedDataRejected 즉사).
+  - **대형 공개 라이브러리 청크는 SKIP**: `pdf.worker`/`pdf-*`/`decode-*`/`bgremove-*`(onnx는 eval/wasm이라
+    난독화 시 동작 위험)/`imagetracer*`. 난독화 대상 = main·preload·`index-*`·`pdftools-*` 6개.
+  - 규칙은 `docs/guides/packaging.md`에 "배포 소스 보호" 절로 문서화.
+- **난독화 빌드 전체 기능 회귀 E2E** — 이전 세션 스크립트가 scratchpad라 소실 → Playwright `_electron`
+  스크립트 새로 작성해 **`test/e2e/full-regression.mjs`로 상설화**(todo P2 "GUI 자동 검증 상설화" 해소.
+  playwright는 devDep 아님 — `npm i --no-save playwright`로 실행 시 임시 설치).
+  픽스처는 자체 PNG 인코더 + pdf-lib PDF + utif2 TIFF로 생성, main 프로세스 dialog는 스텁.
+  **24/24 PASS**: 이미지→JPEG/WebP/BMP/ICO/SVG, 리사이즈·회전(크기 스왑 검증)·undo/redo·흑백(픽셀)·
+  흰색→투명(픽셀 alpha)·워터마크·자르기 드래그·다중→PDF / PDF→PNG 페이지별·분할·회전·삭제·순서·병합
+  (페이지 수 검증) / TIFF·SVG·ICO 입력 / **AI 배경 제거 실추론**(bgrm:// 서빙, 모서리 alpha=0 확인).
+  HEIC 입력만 미검증(오프라인에서 픽스처 생성 불가 — v1.3.0에서 사용자 실기기 확인 예정 항목 유지).
+- 검증: typecheck ✅ / core 테스트 9 ✅ / build(난독화 포함) ✅ / E2E 24/24 ✅. 테스트 프로세스 종료 확인.
+- v1.3.1 → **v1.3.2**. 인스톨러 구움.
+
+**현재 상태**: 전 기능 동작(난독화 빌드 기준 검증). 설치본 소스 보호 적용.
+**다음**: 사용자 설치 테스트 (난독화로 인한 체감 차이는 없어야 정상).
+
+---
+
 ## 2026-07-13 (세션 8-g) — UI/UX 확대·폴리시 + 번들 최적화 + 데드코드 정리 (v1.3.1)
 
 사용자: v1.3.0 확인(AI 배경 제거 "감탄"). 지시: TailAdmin 폴더(임시 업로드)에서 UI 컴포넌트를

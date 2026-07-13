@@ -32,8 +32,9 @@ pdfguru 파리티 전체가 새 프로젝트로 승계됨 (session-log 세션 5,
   - v1.0.1 잔여 확인: exe 아이콘(여전히 Electron이면 **Windows 아이콘 캐시** → 재부팅/캐시 초기화, 그래도면 rcedit 재점검), 편집 텍스트 도구.
 - **변환 경로 캔버스 상한 검토(P2~P3)**: 미리보기는 2600px 상한을 넣었지만, 변환(PDF→이미지 3x 등)은 스캔 대형 페이지에서 여전히 거대 캔버스 가능.
 - ~~**UI 프레임워크 도입 여부**~~ → **2026-07-10 해결(v1.1.0)**: pdf-editor와 동일하게 MUI 채택, 디자인 시스템 이식 완료 (session-log 세션 7).
-- **GUI 자동 검증 상설화**: 이번 세션에서 Playwright(headless chromium + vite dev)로 렌더러 검증이 됨을 확인.
-  scratchpad 1회용 스크립트를 `test/e2e/`로 리포에 옮기고 playwright를 devDependency로 넣을지 결정.
+- ~~GUI 자동 검증 상설화~~ → **2026-07-13 해결(v1.3.2)**: `test/e2e/full-regression.mjs` 상설화
+  (_electron 24종 — 이미지 변환·옵션·PDF 도구·특수 입력·AI 배경 제거). playwright는 devDep에 넣지 않고
+  `npm i --no-save playwright`로 실행 시 임시 설치 (세션 8-h).
 
 ## P3 — 개선 후보
 

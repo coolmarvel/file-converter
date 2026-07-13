@@ -22,6 +22,21 @@ Windows/macOS 설치 파일을 만드는 규칙의 SSOT. 자매 프로젝트 `~/
 - **v1.3.0부터 AI 배경 제거 모델(354MB)이 extraResources(`bgrm-data`)로 번들** — 어떤 OS든 설치 파일이
   ~380MB+. 맥 dmg도 동일하게 커진다.
 
+## 배포 소스 보호 (난독화) — v1.3.2~
+
+`npm run build` = `electron-vite build` + `node scripts/obfuscate.cjs`. 모든 `pack:*`/`dist:*`가
+이 `build`를 경유하므로 어떤 인스톨러든 자동 적용된다. 규칙의 원본은
+`~/project-seed/guides/desktop-packaging.md` §배포 소스 보호, 스크립트 원본은 `~/pdf-editor/scripts/obfuscate.cjs`.
+
+- **⚠ V8 바이트코드(electron-vite `bytecodePlugin`)는 금지** — 컴파일 플랫폼 종속이라 WSL 빌드 →
+  Windows 실행 시 `cachedDataRejected` 즉사 (pdf-editor v1.4.2 사고).
+- **보수 설정**: `controlFlowFlattening`/`deadCodeInjection`/`selfDefending`/`debugProtection` OFF,
+  식별자 hex화 + 문자열 배열(threshold 0.6, rotate/shuffle)만 ON.
+- **대형 공개 라이브러리 청크 제외** (보호 가치 없음 + 성능·동작 위험): `pdf.worker`, `pdf-*`(pdf.js·pdf-lib),
+  `decode-*`(heic2any·utif2), `bgremove-*`(imgly·onnxruntime — eval/wasm이라 난독화 시 깨질 수 있음),
+  `imagetracer*`. 우리 코드는 `index-*`(엔트리+공유 청크)·`pdftools-*`·main·preload에 있고 이들만 난독화.
+- 청크 이름이 바뀌면(코드 분할 변경 시) `scripts/obfuscate.cjs`의 `SKIP` 정규식을 함께 손본다.
+
 ## Windows (현재 사용 중)
 
 - 명령: `npm run dist:win` (WSL에서 Wine 필요. Wine 없이 확인은 `npm run pack:win`)
