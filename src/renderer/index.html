@@ -3,9 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- bgrm: = AI 배경 제거 모델 서빙(커스텀 프로토콜). unsafe-eval/wasm-unsafe-eval = onnxruntime-web 실행 요건
+         (원격 스크립트는 connect/img 제한으로 여전히 차단 — 오프라인 로컬 앱 전제) -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self'"
+      content="default-src 'self'; img-src 'self' data: blob:; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' blob: data: bgrm:"
     />
     <title>파일 변환기</title>
   </head>

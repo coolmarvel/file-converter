@@ -4,10 +4,14 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import Snackbar from '@mui/material/Snackbar'
 import Alert from '@mui/material/Alert'
+import LinearProgress from '@mui/material/LinearProgress'
+import Paper from '@mui/material/Paper'
+import CircularProgress from '@mui/material/CircularProgress'
 import { detectFileKind, targetsFor, FileKind, FORMATS } from '@core/index'
 import { AppFile } from './types'
-import { runConversion } from './convert'
-import { Transform, CropRect } from './convert/image'
+import { runConversion, BgOptions, NamedBytes } from './convert'
+import { Transform, CropRect, supportsAlpha } from './convert/image'
+import type { PdfToolRequest } from './convert/pdftools'
 import { WatermarkOpts, DEFAULT_WATERMARK } from './watermark/model'
 import TopBar from './components/TopBar'
 import ConvertToolbar from './components/ConvertToolbar'
@@ -19,8 +23,11 @@ import { ui } from './theme'
 import signUrl from './assets/sign.png'
 
 type Status = { kind: 'info' | 'ok' | 'err'; text: string } | null
+/** 오래 걸리는 작업의 진행 표시 (value 없으면 불확정 바) */
+type Progress = { label: string; value?: number } | null
 
 const DEFAULT_TRANSFORM: Transform = { rotate: 0, flipH: false, flipV: false, grayscale: false }
+const DEFAULT_BG: BgOptions = { mode: 'none', tolerance: 12 }
 let idSeq = 0
 
 /** undo/redo 이력 한 칸 — 작업 결과에 영향을 주는 상태 전부의 스냅샷 (bytes는 불변이라 참조 공유) */
@@ -34,6 +41,7 @@ interface Snapshot {
   quality: number
   tf: Transform
   crop: CropRect | null
+  bg: BgOptions
   wm: WatermarkOpts
 }
 
@@ -56,12 +64,18 @@ export default function App(): JSX.Element {
   const [tf, setTf] = useState<Transform>(DEFAULT_TRANSFORM)
   const [crop, setCrop] = useState<CropRect | null>(null)
   const [cropMode, setCropMode] = useState(false)
+  const [bg, setBg] = useState<BgOptions>(DEFAULT_BG)
   const [wm, setWm] = useState<WatermarkOpts>(DEFAULT_WATERMARK)
   const [status, setStatus] = useState<Status>(null)
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState<Progress>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [histState, setHistState] = useState({ canUndo: false, canRedo: false })
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // AI 배경 제거 결과 캐시 (fileId → PNG 바이트/미리보기 URL). 이력 대상 아님 — 같은 파일 재계산 방지용
+  const aiCache = useRef<Map<string, Uint8Array>>(new Map())
+  const [aiUrls, setAiUrls] = useState<Map<string, string>>(new Map())
+  const aiGen = useRef(0) // 파일/모드 변경 시 이전 배치 결과 무시
 
   const commonKind = useMemo<FileKind | 'mixed' | null>(() => {
     if (files.length === 0) return null
@@ -86,7 +100,7 @@ export default function App(): JSX.Element {
   // ── undo/redo ──────────────────────────────────────────────────────────
   // 상태 변경을 지켜보다가 잠잠해지면(디바운스) 직전 스냅샷을 이력에 쌓는다.
   // 자르기 드래그·슬라이더처럼 연속으로 바뀌는 조작이 이력 한 칸이 되도록.
-  const snapshot: Snapshot = { files, activeId, target, scale, resizeW, resizeH, quality, tf, crop, wm }
+  const snapshot: Snapshot = { files, activeId, target, scale, resizeW, resizeH, quality, tf, crop, bg, wm }
   const hist = useRef<{ past: Snapshot[]; future: Snapshot[] }>({ past: [], future: [] })
   const committed = useRef<Snapshot>(snapshot) // 마지막으로 이력에 반영된 상태
   const restoring = useRef(false) // undo/redo로 인한 상태 변경은 이력에 다시 쌓지 않는다
@@ -125,7 +139,7 @@ export default function App(): JSX.Element {
     if (commitTimer.current) clearTimeout(commitTimer.current)
     commitTimer.current = setTimeout(flushHistory, HISTORY_DEBOUNCE)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, activeId, target, scale, resizeW, resizeH, quality, tf, crop, wm])
+  }, [files, activeId, target, scale, resizeW, resizeH, quality, tf, crop, bg, wm])
 
   function applySnapshot(s: Snapshot): void {
     restoring.current = true
@@ -138,6 +152,7 @@ export default function App(): JSX.Element {
     setQuality(s.quality)
     setTf(s.tf)
     setCrop(s.crop)
+    setBg(s.bg)
     setWm(s.wm)
   }
 
@@ -183,17 +198,58 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // AI 배경 제거가 켜져 있으면 제거된 결과 URL을 미리보기로 (WYSIWYG)
+  const urlOf = (f: AppFile): string | undefined => (bg.mode === 'ai' ? aiUrls.get(f.id) ?? f.previewUrl : f.previewUrl)
+
   const previewSource = useMemo<PreviewSource>(() => {
     if (commonKind && commonKind !== 'mixed' && FORMATS[commonKind].isImage && target === 'pdf' && files.length > 0) {
-      const urls = files.map((f) => f.previewUrl).filter((u): u is string => !!u)
+      const urls = files.map(urlOf).filter((u): u is string => !!u)
       if (urls.length) return { type: 'images', urls }
     }
     const active = files.find((f) => f.id === activeId)
     if (!active) return null
-    if (FORMATS[active.kind].isImage && active.previewUrl) return { type: 'images', urls: [active.previewUrl] }
+    if (FORMATS[active.kind].isImage && active.previewUrl) return { type: 'images', urls: [urlOf(active)!] }
     if (active.kind === 'pdf') return { type: 'pdf', bytes: active.bytes, scale: 2 }
     return null
-  }, [files, activeId, commonKind, target])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, activeId, commonKind, target, bg.mode, aiUrls])
+
+  // AI 배경 제거: 켜지면 이미지 파일들을 순차 처리해 미리보기·변환 공용 캐시에 담는다
+  useEffect(() => {
+    if (bg.mode !== 'ai' || !sourceIsImage) return
+    const todo = files.filter((f) => FORMATS[f.kind].isImage && !aiCache.current.has(f.id))
+    if (todo.length === 0) return
+    const gen = ++aiGen.current
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { removeBackgroundBytes } = await import('./convert/bgremove')
+        for (let i = 0; i < todo.length; i++) {
+          if (cancelled || gen !== aiGen.current) return
+          const f = todo[i]
+          setProgress({ label: `AI 배경 제거 중… (${i + 1}/${todo.length}) ${f.name}` })
+          const png = await removeBackgroundBytes(f.bytes, FORMATS[f.kind].mime ?? 'image/png', (label) => {
+            if (gen === aiGen.current) setProgress({ label: `${label} (${i + 1}/${todo.length})` })
+          })
+          if (cancelled || gen !== aiGen.current) return
+          aiCache.current.set(f.id, png)
+          const url = URL.createObjectURL(new Blob([png as unknown as BlobPart], { type: 'image/png' }))
+          setAiUrls((prev) => new Map(prev).set(f.id, url))
+        }
+      } catch (e) {
+        if (gen === aiGen.current) {
+          setStatus({ kind: 'err', text: `AI 배경 제거 실패: ${e instanceof Error ? e.message : String(e)}` })
+          setBg((prev) => (prev.mode === 'ai' ? { ...prev, mode: 'none' } : prev))
+        }
+      } finally {
+        if (gen === aiGen.current) setProgress(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bg.mode, files, sourceIsImage])
 
   // 렌더러 크래시 → 자동 복구 후 안내 (조용히 리셋되면 "앱이 꺼졌다"로 오해)
   useEffect(() => {
@@ -204,19 +260,39 @@ export default function App(): JSX.Element {
 
   async function addFiles(incoming: File[]): Promise<void> {
     const loaded: AppFile[] = []
-    for (const file of incoming) {
-      const buf = new Uint8Array(await file.arrayBuffer())
-      const kind = detectFileKind(file.name, buf.subarray(0, 512)) // SVG 텍스트 마커까지 커버
-      const isImage = FORMATS[kind].isImage
-      loaded.push({
-        id: `f${idSeq++}`,
-        name: file.name,
-        kind,
-        size: buf.length,
-        bytes: buf,
-        previewUrl: isImage ? URL.createObjectURL(new Blob([buf], { type: FORMATS[kind].mime })) : undefined
-      })
+    try {
+      for (const file of incoming) {
+        let buf = new Uint8Array(await file.arrayBuffer())
+        let kind = detectFileKind(file.name, buf.subarray(0, 512)) // SVG 텍스트 마커까지 커버
+        let srcKind: FileKind | undefined
+        // 브라우저가 직접 못 여는 포맷은 추가 시점에 PNG로 풀어둔다 (배지는 원래 포맷 유지)
+        if (kind === 'heic' || kind === 'tiff') {
+          setProgress({ label: `${FORMATS[kind].label} 여는 중… ${file.name}` })
+          const { heicToPng, tiffToPng } = await import('./convert/decode')
+          try {
+            buf = kind === 'heic' ? await heicToPng(buf) : await tiffToPng(buf)
+            srcKind = kind
+            kind = 'png'
+          } catch (e) {
+            setStatus({ kind: 'err', text: `${file.name}: ${FORMATS[kind].label} 해석 실패 — ${e instanceof Error ? e.message : String(e)}` })
+            continue
+          }
+        }
+        const isImage = FORMATS[kind].isImage
+        loaded.push({
+          id: `f${idSeq++}`,
+          name: file.name,
+          kind,
+          srcKind,
+          size: buf.length,
+          bytes: buf,
+          previewUrl: isImage ? URL.createObjectURL(new Blob([buf], { type: FORMATS[kind].mime })) : undefined
+        })
+      }
+    } finally {
+      setProgress(null)
     }
+    if (loaded.length === 0) return
     setFiles((prev) => {
       const next = [...prev, ...loaded]
       if (!activeId && next.length) setActiveId(next[0].id)
@@ -224,6 +300,33 @@ export default function App(): JSX.Element {
     })
     setStatus(null)
   }
+
+  // Ctrl+V — 클립보드의 이미지(스크린샷 등)를 파일로 추가
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent): void => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      const images: File[] = []
+      for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const f = item.getAsFile()
+          if (f) {
+            const ext = (f.type.split('/')[1] ?? 'png').replace('jpeg', 'jpg')
+            images.push(new File([f], f.name && f.name !== 'image.png' ? f.name : `붙여넣기_${new Date().toLocaleTimeString('ko', { hour12: false }).replaceAll(':', '')}.${ext}`, { type: f.type }))
+          }
+        }
+      }
+      if (images.length) {
+        e.preventDefault()
+        void addFiles(images)
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
 
   function removeFile(id: string): void {
     // previewUrl은 revoke하지 않는다 — undo로 파일을 되살릴 때 다시 쓴다 (앱 종료 시 일괄 해제됨)
@@ -248,7 +351,8 @@ export default function App(): JSX.Element {
   async function handleConvert(): Promise<void> {
     if (!target || files.length === 0) return
     setBusy(true)
-    setStatus({ kind: 'info', text: '변환 중…' })
+    setStatus(null)
+    setProgress({ label: '변환 준비 중…' })
     try {
       const results = await runConversion(files, {
         to: target,
@@ -257,30 +361,57 @@ export default function App(): JSX.Element {
         quality: quality / 100,
         transform: sourceIsImage ? tf : undefined,
         crop,
-        watermark: wm.enabled ? wm : undefined
+        bg: sourceIsImage || commonKind === 'pdf' ? bg : undefined,
+        aiCache: aiCache.current,
+        watermark: wm.enabled ? wm : undefined,
+        onProgress: (done, total, label) =>
+          setProgress({ label: label ?? `변환 중… (${Math.min(done + 1, total)}/${total})`, value: total > 0 ? Math.round((done / total) * 100) : undefined })
       })
+      setProgress(null)
       if (results.length === 0) throw new Error('변환 결과가 없습니다.')
-
-      if (results.length === 1) {
-        const savedPath = await window.api.saveBuffer(results[0].name, results[0].bytes)
-        if (!savedPath) return setStatus({ kind: 'info', text: '저장이 취소되었습니다.' })
-        await window.api.showItem(savedPath)
-        setStatus({ kind: 'ok', text: `저장 완료: ${savedPath}` })
-      } else {
-        const dir = await window.api.pickSaveDir()
-        if (!dir) return setStatus({ kind: 'info', text: '저장이 취소되었습니다.' })
-        let first = ''
-        for (const r of results) {
-          const p = await window.api.writeInDir(dir, r.name, r.bytes)
-          if (!first) first = p
-        }
-        if (first) await window.api.showItem(first)
-        setStatus({ kind: 'ok', text: `${results.length}개 파일 저장 완료: ${dir}` })
-      }
+      await saveResults(results)
     } catch (e) {
       setStatus({ kind: 'err', text: e instanceof Error ? e.message : '변환 중 오류가 발생했습니다.' })
     } finally {
       setBusy(false)
+      setProgress(null)
+    }
+  }
+
+  /** 결과물 저장 공통 흐름: 1개 = 저장 다이얼로그, 여러 개 = 폴더 선택 후 일괄 (변환·PDF 도구 공용) */
+  async function saveResults(results: NamedBytes[]): Promise<void> {
+    if (results.length === 1) {
+      const savedPath = await window.api.saveBuffer(results[0].name, results[0].bytes)
+      if (!savedPath) return setStatus({ kind: 'info', text: '저장이 취소되었습니다.' })
+      await window.api.showItem(savedPath)
+      setStatus({ kind: 'ok', text: `저장 완료: ${savedPath}` })
+    } else {
+      const dir = await window.api.pickSaveDir()
+      if (!dir) return setStatus({ kind: 'info', text: '저장이 취소되었습니다.' })
+      let first = ''
+      for (const r of results) {
+        const p = await window.api.writeInDir(dir, r.name, r.bytes)
+        if (!first) first = p
+      }
+      if (first) await window.api.showItem(first)
+      setStatus({ kind: 'ok', text: `${results.length}개 파일 저장 완료: ${dir}` })
+    }
+  }
+
+  /** PDF 문서 정리(병합/분할/회전/삭제/순서) 실행 + 저장 */
+  async function handlePdfTool(req: PdfToolRequest): Promise<void> {
+    setBusy(true)
+    setProgress({ label: 'PDF 처리 중…' })
+    try {
+      const { runPdfTool } = await import('./convert/pdftools') // pdf-lib 청크는 실제 사용 시에만
+      const results = await runPdfTool(files, activeId, req)
+      setProgress(null)
+      await saveResults(results)
+    } catch (e) {
+      setStatus({ kind: 'err', text: e instanceof Error ? e.message : 'PDF 처리 중 오류가 발생했습니다.' })
+    } finally {
+      setBusy(false)
+      setProgress(null)
     }
   }
 
@@ -328,6 +459,10 @@ export default function App(): JSX.Element {
         cropMode={cropMode}
         onCrop={setCrop}
         onCropMode={setCropMode}
+        bg={bg}
+        onBg={setBg}
+        pdfCount={files.filter((f) => f.kind === 'pdf').length}
+        onPdfTool={(req) => void handlePdfTool(req)}
         wm={wm}
         onWm={setWm}
       />
@@ -352,6 +487,8 @@ export default function App(): JSX.Element {
               crop={crop}
               cropMode={cropMode}
               onCrop={setCrop}
+              whiteTolerance={bg.mode === 'white' && target && supportsAlpha(target) ? bg.tolerance : null}
+              transparent={bg.mode !== 'none' && !!target && supportsAlpha(target)}
             />
           )}
         </Box>
@@ -378,12 +515,27 @@ export default function App(): JSX.Element {
         type="file"
         multiple
         hidden
-        accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.svg,.avif"
+        accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.svg,.avif,.heic,.heif,.tif,.tiff,.ico"
         onChange={(e) => {
           if (e.target.files) void addFiles(Array.from(e.target.files))
           e.target.value = ''
         }}
       />
+
+      {progress && (
+        <Paper
+          elevation={6}
+          sx={{ position: 'fixed', bottom: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 1400, px: 2.5, py: 1.5, borderRadius: 3, minWidth: 340, maxWidth: '80vw' }}
+        >
+          <Stack direction="row" alignItems="center" spacing={1.2} sx={{ mb: 1 }}>
+            <CircularProgress size={18} />
+            <Typography variant="body2" sx={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {progress.label}
+            </Typography>
+          </Stack>
+          <LinearProgress variant={progress.value != null ? 'determinate' : 'indeterminate'} value={progress.value ?? 0} sx={{ borderRadius: 1 }} />
+        </Paper>
+      )}
 
       <Snackbar
         open={!!status}

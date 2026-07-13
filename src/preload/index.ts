@@ -8,6 +8,8 @@ const api = {
   writeInDir: (dirPath: string, fileName: string, data: Uint8Array): Promise<string> =>
     ipcRenderer.invoke('fs:writeInDir', dirPath, fileName, data),
   showItem: (fullPath: string): Promise<void> => ipcRenderer.invoke('shell:showItem', fullPath),
+  /** AI 배경 제거 모델 에셋 베이스 URL (main의 bgrm:// 프로토콜이 서빙) */
+  bgAssetsUrl: 'bgrm://assets/',
   /** 렌더러 크래시 → 자동 복구(reload) 후 호출됨. 사용자 안내용. */
   onRecovered: (cb: (reason: string) => void): void => {
     ipcRenderer.on('app:recovered', (_e, reason: string) => cb(reason))

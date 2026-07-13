@@ -5,7 +5,7 @@
  * SVG만 예외적으로 텍스트라서 앞부분에 "<svg" 문자열이 있는지로 판별한다.
  */
 
-export type FileKind = 'pdf' | 'png' | 'jpeg' | 'webp' | 'bmp' | 'gif' | 'svg' | 'avif' | 'unknown'
+export type FileKind = 'pdf' | 'png' | 'jpeg' | 'webp' | 'bmp' | 'gif' | 'svg' | 'avif' | 'heic' | 'tiff' | 'ico' | 'unknown'
 
 export interface FormatInfo {
   kind: FileKind
@@ -25,6 +25,9 @@ export const FORMATS: Record<FileKind, FormatInfo> = {
   gif: { kind: 'gif', label: 'GIF', isImage: true, extensions: ['gif'], mime: 'image/gif' },
   svg: { kind: 'svg', label: 'SVG', isImage: true, extensions: ['svg'], mime: 'image/svg+xml' },
   avif: { kind: 'avif', label: 'AVIF', isImage: true, extensions: ['avif'], mime: 'image/avif' },
+  heic: { kind: 'heic', label: 'HEIC', isImage: true, extensions: ['heic', 'heif'], mime: 'image/heic' },
+  tiff: { kind: 'tiff', label: 'TIFF', isImage: true, extensions: ['tif', 'tiff'], mime: 'image/tiff' },
+  ico: { kind: 'ico', label: 'ICO', isImage: true, extensions: ['ico'], mime: 'image/x-icon' },
   unknown: { kind: 'unknown', label: '알 수 없음', isImage: false, extensions: [] }
 }
 
@@ -68,12 +71,16 @@ export function detectFileKind(fileName: string, header?: Uint8Array): FileKind 
     if (startsWith(header, [0x47, 0x49, 0x46, 0x38])) return 'gif'
     // BMP: "BM"
     if (startsWith(header, [0x42, 0x4d])) return 'bmp'
-    // AVIF: ISO-BMFF "ftyp" 박스의 브랜드 avif/avis
-    if (
-      startsWith(header, [0x66, 0x74, 0x79, 0x70], 4) &&
-      (startsWith(header, [0x61, 0x76, 0x69, 0x66], 8) || startsWith(header, [0x61, 0x76, 0x69, 0x73], 8))
-    )
-      return 'avif'
+    // ISO-BMFF "ftyp" 박스 브랜드로 AVIF/HEIC 구분
+    if (startsWith(header, [0x66, 0x74, 0x79, 0x70], 4)) {
+      const brand = String.fromCharCode(header[8] ?? 0, header[9] ?? 0, header[10] ?? 0, header[11] ?? 0)
+      if (brand === 'avif' || brand === 'avis') return 'avif'
+      if (['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1'].includes(brand)) return 'heic'
+    }
+    // TIFF: "II*\0"(리틀엔디언) 또는 "MM\0*"(빅엔디언)
+    if (startsWith(header, [0x49, 0x49, 0x2a, 0x00]) || startsWith(header, [0x4d, 0x4d, 0x00, 0x2a])) return 'tiff'
+    // ICO: 예약 0, 타입 1
+    if (startsWith(header, [0x00, 0x00, 0x01, 0x00])) return 'ico'
     if (looksLikeSvg(header)) return 'svg'
   }
   return kindFromExtension(fileName)

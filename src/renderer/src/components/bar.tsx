@@ -16,8 +16,8 @@ import { ui } from '../theme'
  * 컨트롤마다 [의미 아이콘] + [36px 통일 높이 박스] 로 묶고 그룹 사이는 세로 구분선.
  */
 
-/** 통일된 컨트롤 높이 */
-export const CTL_H = 36
+/** 통일된 컨트롤 높이 (2026-07-13 UI 확대: 36 → 40) */
+export const CTL_H = 40
 
 export const selectSx = {
   height: CTL_H,
@@ -41,7 +41,7 @@ export const boxBtnSx = {
 
 /** 그룹: 회색 의미 아이콘 + 컨트롤 (아이콘에 툴팁) */
 export function Group({ icon, tooltip, children }: { icon?: React.ReactNode; tooltip?: string; children: React.ReactNode }): JSX.Element {
-  const iconBox = icon ? <Box sx={{ display: 'flex', color: ui.gray[500], '& svg': { fontSize: 20 } }}>{icon}</Box> : null
+  const iconBox = icon ? <Box sx={{ display: 'flex', color: ui.gray[500], '& svg': { fontSize: 22 } }}>{icon}</Box> : null
   return (
     <Stack direction="row" alignItems="center" spacing={0.7} sx={{ flexShrink: 0 }}>
       {iconBox && (tooltip ? <Tooltip title={tooltip}>{iconBox}</Tooltip> : iconBox)}
@@ -82,7 +82,7 @@ export function BarInput({
         border: `1px solid ${ui.gray[300]}`,
         borderRadius: 2,
         bgcolor: '#fff',
-        fontSize: 14.5,
+        fontSize: 15.5,
         fontFamily: 'inherit',
         outline: 'none',
         boxShadow: ui.shadow.xs,
@@ -184,6 +184,58 @@ export function PaletteControl({
   )
 }
 
+/** 켜기/끄기 칩 버튼 — 켜지면 브랜드 틴트 (워터마크·흑백·자르기 등 공용) */
+export function ToggleChip({ icon, label, tooltip, on, onClick }: { icon: JSX.Element; label: string; tooltip: string; on: boolean; onClick: () => void }): JSX.Element {
+  return (
+    <Tooltip title={tooltip}>
+      <ButtonBase
+        onClick={onClick}
+        sx={{
+          height: CTL_H,
+          px: 1.4,
+          borderRadius: 2,
+          border: `1px solid ${on ? ui.brand[500] : ui.gray[300]}`,
+          bgcolor: on ? 'primary.light' : '#fff',
+          color: on ? 'primary.main' : ui.gray[700],
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.7,
+          flexShrink: 0,
+          boxShadow: ui.shadow.xs,
+          '&:hover': { bgcolor: on ? 'primary.light' : ui.gray[50] },
+          '&.Mui-focusVisible': { boxShadow: ui.shadow.focusRing }
+        }}
+      >
+        {icon}
+        <Typography sx={{ fontSize: 15, fontWeight: 500, whiteSpace: 'nowrap' }}>{label}</Typography>
+      </ButtonBase>
+    </Tooltip>
+  )
+}
+
+/** 정사각 아이콘 토글 버튼 (반전 등) — 켜지면 브랜드 틴트 */
+export function IconToggle({ icon, tooltip, on, onClick }: { icon: JSX.Element; tooltip: string; on: boolean; onClick: () => void }): JSX.Element {
+  return (
+    <Tooltip title={tooltip}>
+      <ButtonBase
+        onClick={onClick}
+        sx={{
+          width: CTL_H,
+          height: CTL_H,
+          borderRadius: 2,
+          border: `1px solid ${on ? ui.brand[500] : ui.gray[300]}`,
+          bgcolor: on ? 'primary.light' : '#fff',
+          color: on ? 'primary.main' : ui.gray[600],
+          boxShadow: ui.shadow.xs,
+          '&:hover': { bgcolor: on ? 'primary.light' : ui.gray[50] }
+        }}
+      >
+        {icon}
+      </ButtonBase>
+    </Tooltip>
+  )
+}
+
 /** [아이콘] + 박스형 값 버튼 → 슬라이더 팝오버 (진하기/크기/간격/기울기 공용) */
 export function SliderControl({
   icon,
@@ -209,7 +261,7 @@ export function SliderControl({
     <Group icon={icon} tooltip={tooltip}>
       <Tooltip title={tooltip}>
         <ButtonBase onClick={(e) => setAnchor(e.currentTarget)} sx={{ ...boxBtnSx, px: 1 }}>
-          <Typography sx={{ fontSize: 14.5, minWidth: 38, textAlign: 'left', whiteSpace: 'nowrap' }}>{format(value)}</Typography>
+          <Typography sx={{ fontSize: 15.5, minWidth: 42, textAlign: 'left', whiteSpace: 'nowrap' }}>{format(value)}</Typography>
           <ArrowDropDownRounded sx={{ fontSize: 18, color: ui.gray[500] }} />
         </ButtonBase>
       </Tooltip>

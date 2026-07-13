@@ -18,11 +18,15 @@ DICOM은 v1.1.1(2026-07-13)에서 제거 — 전용 DICOM 변환기 프로젝트
 | 원본 | 대상 | 구현 |
 |---|---|---|
 | PDF | PNG / JPEG / WebP (페이지별) | `convert/pdf.ts` `pdfToImages` |
-| 이미지(PNG/JPG/WebP/BMP/GIF/SVG/AVIF) | PDF (여러 장 → 1개) | `convert/pdf.ts` `imagesToPdf` |
+| 이미지(PNG/JPG/WebP/BMP/GIF/SVG/AVIF/HEIC/TIFF/ICO) | PDF (여러 장 → 1개) | `convert/pdf.ts` `imagesToPdf` |
 | 이미지 | PNG / JPEG / WebP / BMP — **같은 포맷도 허용** | `convert/image.ts` `convertImageFormat` |
+| 이미지 | ICO (16~256 멀티사이즈) | `convert/image.ts` `convertImageToIco` + `core/ico.ts` |
+| 이미지 | SVG (벡터 트레이싱, 로고용) | `convert/image.ts` `convertImageToSvg` (imagetracerjs) |
+| PDF | PDF 문서 정리 (병합/분할/회전/삭제/순서) | `convert/pdftools.ts` + OptionsBar PDF 도구 |
 
 - 변환 경로의 진실은 `core/conversions.ts`의 `targetsFor()`다. 새 변환 추가 = 여기 + `convert/index.ts` 디스패처 두 곳.
-- **입력 전용 포맷**: GIF/SVG/AVIF — 브라우저가 디코딩만 지원(canvas 인코딩 불가). `IMAGE_OUTPUTS`(png/jpeg/webp/bmp)만 출력 가능.
+- **입력 전용 포맷**: GIF/AVIF(브라우저 디코딩만), **HEIC/TIFF는 추가 시점에 PNG로 디코드**(`convert/decode.ts`,
+  heic2any·utif2 — `AppFile.srcKind`로 원래 포맷 배지 유지). `IMAGE_OUTPUTS`(png/jpeg/webp/bmp)만 출력 가능.
 - **BMP 출력**: canvas.toBlob이 BMP를 지원하지 않아 자체 인코더 `core/bmp.ts` `encodeBmp`(24bit BI_RGB) 사용. 순수 TS라 테스트 있음.
 - **같은 포맷 → 같은 포맷**: 크기·품질·회전만 바꿔 재저장하는 용도 (예: JPEG 크기만 줄이기). 레지스트리 라벨 "(크기·품질만 조절)".
 - GIF는 첫 프레임만 변환된다(캔버스 드로잉 특성). 애니메이션 보존은 미지원.
@@ -39,7 +43,11 @@ DICOM은 v1.1.1(2026-07-13)에서 제거 — 전용 DICOM 변환기 프로젝트
   `App.tsx` `tf`(Transform) → `convertImageFormat`. 처리 순서: 리사이즈 → 변형 → 워터마크(항상 정방향) → 인코딩.
 - **자르기(v1.2.0)**: 모든 소스. `CropRect`(0~1 정규화, **미리보기 화면 기준**) → `applyCrop`.
   파이프라인 순서: 리사이즈 → 회전/반전/흑백 → **자르기** → 워터마크(잘린 결과 기준). Preview `CropLayer`로 편집.
-- **워터마크**: 모든 대상. `guides/watermark.md`.
+- **배경(v1.3.0)**: [배경] select — 흰색→투명(`removeWhiteBg`, 투명 가능 출력=`supportsAlpha`만) /
+  **AI 배경 제거**(`convert/bgremove.ts`, @imgly 1.4.5 고정 — 모델 354MB extraResources 번들 + main bgrm:// 프로토콜 서빙,
+  CSP에 bgrm:·unsafe-eval 필요). 처리 순서: (AI는 원본 선처리) → 리사이즈 → 변형 → 자르기 → 흰색제거 → 워터마크.
+- **워터마크**: SVG 대상 제외 전부. `guides/watermark.md`.
+- **진행 표시**: `ConvertOptions.onProgress` → App `progress` 상태 → 하단 로딩바.
 - **undo/redo(v1.2.0)**: `App.tsx`의 Snapshot 이력(400ms 디바운스, 최대 100칸). Ctrl+Z/Ctrl+Y + 툴바 버튼.
   파일 삭제 복원 때문에 removeFile은 previewUrl을 revoke하지 않는다.
 

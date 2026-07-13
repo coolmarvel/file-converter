@@ -42,6 +42,9 @@ export function targetsFor(kind: FileKind): ConversionTarget[] {
         merges: false
       })
     }
+    // 특수 출력: 아이콘 컨테이너(멀티사이즈 PNG 임베드) / 벡터 트레이싱(로고·아이콘용)
+    targets.push({ to: 'ico', label: 'ICO 아이콘 (16~256px 멀티사이즈)', merges: false })
+    if (kind !== 'svg') targets.push({ to: 'svg', label: 'SVG 벡터화 (로고·단순 이미지용)', merges: false })
     return targets
   }
   return []
@@ -51,19 +54,5 @@ export function canConvert(kind: FileKind): boolean {
   return targetsFor(kind).length > 0
 }
 
-/** PDF "문서 정리" 작업 (from→to 변환과 별개 트랙) */
-export type PdfOp = 'merge' | 'split' | 'rotate' | 'deletePages' | 'reorder'
-
-export interface PdfOpInfo {
-  op: PdfOp
-  label: string
-  description: string
-}
-
-export const PDF_OPS: PdfOpInfo[] = [
-  { op: 'merge', label: '병합', description: '여러 PDF를 순서대로 하나로' },
-  { op: 'split', label: '분할', description: '페이지 범위별로 나눠 저장' },
-  { op: 'rotate', label: '회전', description: '선택 페이지를 90°씩 회전' },
-  { op: 'deletePages', label: '페이지 삭제', description: '선택한 페이지 제거' },
-  { op: 'reorder', label: '순서 변경', description: '페이지 순서 재배치' }
-]
+// (구 PDF_OPS 메타데이터는 v1.3.0에서 실제 UI가 붙으면서 제거 — 작업 정의는
+//  renderer/convert/pdftools.ts 의 PdfToolRequest 가 SSOT)

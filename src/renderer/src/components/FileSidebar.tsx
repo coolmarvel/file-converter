@@ -40,7 +40,7 @@ function FileCard({
   onMoveUp: () => void
   onMoveDown: () => void
 }): JSX.Element {
-  const info = FORMATS[file.kind]
+  const info = FORMATS[file.srcKind ?? file.kind] // HEIC/TIFF는 원래 포맷으로 배지 표시
   const stop = (fn: () => void) => (e: React.MouseEvent) => {
     e.stopPropagation()
     fn()
@@ -74,8 +74,8 @@ function FileCard({
       </Stack>
       <Box
         sx={{
-          width: 44,
-          height: 44,
+          width: 48,
+          height: 48,
           flexShrink: 0,
           borderRadius: 1.5,
           overflow: 'hidden',
@@ -95,7 +95,7 @@ function FileCard({
         )}
       </Box>
       <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Typography noWrap title={file.name} sx={{ fontSize: 13.5, fontWeight: 500 }}>
+        <Typography noWrap title={file.name} sx={{ fontSize: 14.5, fontWeight: 500 }}>
           {file.name}
         </Typography>
         <Stack direction="row" spacing={0.6} alignItems="center">
@@ -103,9 +103,9 @@ function FileCard({
             label={info.label}
             size="small"
             color={file.kind === 'unknown' ? 'warning' : 'default'}
-            sx={{ height: 18, fontSize: 10.5, fontWeight: 600, '& .MuiChip-label': { px: 0.8 } }}
+            sx={{ height: 20, fontSize: 11.5, fontWeight: 600, '& .MuiChip-label': { px: 0.8 } }}
           />
-          <Typography variant="caption" sx={{ fontSize: 11.5, color: ui.gray[500] }}>
+          <Typography variant="caption" sx={{ fontSize: 12.5, color: ui.gray[500] }}>
             {humanSize(file.size)}
           </Typography>
         </Stack>
@@ -131,11 +131,11 @@ export interface FileSidebarProps {
 /** 좌측 파일 목록 사이드바 (pdf-editor ThumbnailSidebar 위치·톤) */
 export default function FileSidebar(p: FileSidebarProps): JSX.Element {
   return (
-    <Box sx={{ width: 296, flexShrink: 0, borderRight: 1, borderColor: 'divider', bgcolor: ui.gray[25], display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <Box sx={{ width: 312, flexShrink: 0, borderRight: 1, borderColor: 'divider', bgcolor: ui.gray[25], display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <Stack direction="row" alignItems="center" sx={{ px: 1.5, py: 1, borderBottom: 1, borderColor: 'divider' }}>
-        <Typography sx={{ fontWeight: 700, fontSize: 14 }}>파일</Typography>
+        <Typography sx={{ fontWeight: 700, fontSize: 15.5 }}>파일</Typography>
         {p.files.length > 0 && (
-          <Chip label={p.files.length} size="small" color="primary" sx={{ ml: 0.8, height: 18, fontSize: 11, '& .MuiChip-label': { px: 0.8 } }} />
+          <Chip label={p.files.length} size="small" color="primary" sx={{ ml: 0.8, height: 20, fontSize: 12, '& .MuiChip-label': { px: 0.8 } }} />
         )}
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={<AddRounded />} onClick={p.onAddFiles} sx={{ px: 1 }}>

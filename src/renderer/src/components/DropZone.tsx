@@ -40,15 +40,31 @@ export function DropZone({ onFiles }: { onFiles: (files: File[]) => void }): JSX
         transition: 'background-color .15s, border-color .15s'
       }}
     >
-      <Stack spacing={1.2} alignItems="center" sx={{ p: 4, textAlign: 'center' }}>
-        <CloudUploadOutlined sx={{ fontSize: 56, color: over ? ui.brand[500] : ui.gray[400] }} />
-        <Typography sx={{ fontWeight: 700, fontSize: 17 }}>파일을 여기에 끌어다 놓거나 클릭해서 추가하세요</Typography>
-        <Typography variant="caption" color="text.secondary">
-          PDF · PNG · JPEG · WebP · BMP · GIF · SVG · AVIF (여러 개 가능)
+      <Stack spacing={1.4} alignItems="center" sx={{ p: 4, textAlign: 'center' }}>
+        {/* TailAdmin 빈 상태 문법: 브랜드 틴트 원형 아이콘 배지 */}
+        <Box
+          sx={{
+            width: 88,
+            height: 88,
+            borderRadius: '50%',
+            bgcolor: over ? ui.brand[100] : ui.brand[50],
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'background-color .15s'
+          }}
+        >
+          <CloudUploadOutlined sx={{ fontSize: 44, color: ui.brand[500] }} />
+        </Box>
+        <Typography sx={{ fontWeight: 700, fontSize: 19 }}>파일을 여기에 끌어다 놓거나 클릭해서 추가하세요</Typography>
+        <Typography color="text.secondary" sx={{ fontSize: 14.5, maxWidth: 560 }}>
+          PDF · PNG · JPEG · WebP · BMP · GIF · SVG · AVIF · HEIC · TIFF · ICO
+          <br />
+          여러 개 가능 · <b>Ctrl+V</b> 로 클립보드 이미지 붙여넣기
         </Typography>
         <Button
           variant="contained"
-          sx={{ mt: 1, borderRadius: 99, px: 3 }}
+          sx={{ mt: 1, borderRadius: 99, px: 3.2, py: 1, fontSize: 15.5 }}
           onClick={(e) => {
             e.stopPropagation()
             inputRef.current?.click()
@@ -61,7 +77,7 @@ export function DropZone({ onFiles }: { onFiles: (files: File[]) => void }): JSX
         ref={inputRef}
         type="file"
         multiple
-        accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.svg,.avif"
+        accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.svg,.avif,.heic,.heif,.tif,.tiff,.ico"
         style={{ display: 'none' }}
         onChange={(e) => {
           if (e.target.files) onFiles(Array.from(e.target.files))

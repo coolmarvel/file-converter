@@ -10,8 +10,8 @@ import AddRounded from '@mui/icons-material/AddRounded'
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
 import FitScreenRounded from '@mui/icons-material/FitScreenRounded'
-import { openPdf, PdfHandle } from '../convert/pdf'
-import { blobPart, targetSize, ResizeOpts, Transform, CropRect, hasCrop } from '../convert/image'
+import type { PdfHandle } from '../convert/pdf' // 런타임(pdf.js)은 PDF 소스일 때만 지연 로딩
+import { blobPart, targetSize, ResizeOpts, Transform, CropRect, hasCrop, loadImageFromUrl, removeWhiteBg } from '../convert/image'
 import { WatermarkOpts } from '../watermark/model'
 import { WatermarkOverlay } from './WatermarkOverlay'
 import { ui } from '../theme'
@@ -188,9 +188,13 @@ export interface PreviewProps {
   crop?: CropRect | null
   cropMode?: boolean
   onCrop?: (c: CropRect | null) => void
+  /** 흰색→투명 실시간 미리보기 (null=끔) */
+  whiteTolerance?: number | null
+  /** 투명 배경 모드 — 체커보드 배경으로 투명 영역을 보여준다 */
+  transparent?: boolean
 }
 
-export function Preview({ source, watermark, transform, resize, crop = null, cropMode = false, onCrop }: PreviewProps): JSX.Element {
+export function Preview({ source, watermark, transform, resize, crop = null, cropMode = false, onCrop, whiteTolerance = null, transparent = false }: PreviewProps): JSX.Element {
   const [page, setPage] = useState(0)
   const [count, setCount] = useState(0)
   const [url, setUrl] = useState<string | null>(null)
@@ -223,6 +227,36 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
     setNat(null)
   }, [sourceKey])
 
+  // 흰색→투명 실시간 미리보기: 표시 중인 이미지에 같은 픽셀 연산을 적용해 보여준다 (디바운스)
+  const [whiteUrl, setWhiteUrl] = useState<{ src: string; tol: number; out: string } | null>(null)
+  useEffect(() => {
+    if (whiteTolerance == null || !url) {
+      setWhiteUrl(null)
+      return
+    }
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      try {
+        const img = await loadImageFromUrl(url)
+        const k = Math.min(1, 2000 / Math.max(1, img.naturalWidth, img.naturalHeight)) // 미리보기용 상한
+        const c = document.createElement('canvas')
+        c.width = Math.max(1, Math.round(img.naturalWidth * k))
+        c.height = Math.max(1, Math.round(img.naturalHeight * k))
+        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
+        removeWhiteBg(c, whiteTolerance)
+        if (!cancelled) setWhiteUrl({ src: url, tol: whiteTolerance, out: c.toDataURL('image/png') })
+      } catch {
+        if (!cancelled) setWhiteUrl(null)
+      }
+    }, 180)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [url, whiteTolerance])
+
+  const displayUrl = whiteTolerance != null && whiteUrl && whiteUrl.src === url ? whiteUrl.out : url
+
   useEffect(() => {
     setPage(0)
     for (const u of pdfCache.current.values()) URL.revokeObjectURL(u)
@@ -242,7 +276,8 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
     let cancelled = false
     setCount(0)
     setUrl(null)
-    openPdf(source.bytes)
+    import('../convert/pdf')
+      .then(({ openPdf }) => openPdf(source.bytes))
       .then((h) => {
         if (cancelled) {
           h.destroy().catch(() => {})
@@ -344,7 +379,7 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
             </IconButton>
           </span>
         </Tooltip>
-        <Typography variant="caption" sx={{ minWidth: 42, textAlign: 'center', color: ui.gray[600] }}>
+        <Typography sx={{ fontSize: 14.5, minWidth: 48, textAlign: 'center', color: ui.gray[600] }}>
           {Math.round(zoom * 100)}%
         </Typography>
         <Tooltip title="확대">
@@ -375,13 +410,30 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
         }}
       >
         {url ? (
-          <Box sx={{ position: 'relative', m: 'auto', flexShrink: 0, lineHeight: 0, width: frame?.w, height: frame?.h }}>
+          <Box
+            sx={{
+              position: 'relative',
+              m: 'auto',
+              flexShrink: 0,
+              lineHeight: 0,
+              width: frame?.w,
+              height: frame?.h,
+              // 투명 배경 모드: 체커보드로 투명 영역을 보여준다
+              ...(transparent && {
+                backgroundImage: 'conic-gradient(#e2e8f0 0 25%, #ffffff 0 50%, #e2e8f0 0 75%, #ffffff 0)',
+                backgroundSize: '16px 16px',
+                borderRadius: 1
+              })
+            }}
+          >
             <Box
               component="img"
-              src={url}
+              src={displayUrl ?? undefined}
               alt="미리보기"
               onLoad={(e: React.SyntheticEvent<HTMLImageElement>) => {
                 const el = e.currentTarget
+                // 흰색제거 미리보기(축소본)가 아니라 원본이 로드됐을 때만 원본 크기를 갱신
+                if (el.src !== url) return
                 if (el.naturalWidth && el.naturalHeight) setNat({ w: el.naturalWidth, h: el.naturalHeight })
               }}
               sx={
@@ -445,7 +497,7 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
               </IconButton>
             </span>
           </Tooltip>
-          <Typography variant="caption" sx={{ minWidth: 56, textAlign: 'center', color: ui.gray[600] }}>
+          <Typography sx={{ fontSize: 14.5, minWidth: 60, textAlign: 'center', color: ui.gray[600] }}>
             {page + 1} / {count}
           </Typography>
           <Tooltip title="다음 페이지">

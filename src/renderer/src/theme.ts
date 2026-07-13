@@ -52,15 +52,24 @@ export const theme = createTheme({
   typography: {
     // Segoe UI 우선: 숫자·영문을 Malgun Gothic 으로 그리면 작은 크기에서 깨져 보인다 (한글은 Malgun 폴백)
     fontFamily: `'Segoe UI', 'Malgun Gothic', '맑은 고딕', -apple-system, Roboto, sans-serif`,
-    fontSize: 15,
-    caption: { fontSize: 13 },
-    button: { textTransform: 'none', fontWeight: 500 }
+    // 2026-07-13 사용자 피드백 "폰트가 작다" → 전체 한 단계 확대 (TailAdmin theme-sm 14px 상당 → 우리는 데스크톱 앱이라 +2px)
+    fontSize: 16,
+    body2: { fontSize: 15 },
+    caption: { fontSize: 13.5 },
+    button: { textTransform: 'none', fontWeight: 500, fontSize: 15 }
   },
   components: {
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { borderRadius: 8, fontWeight: 500, paddingLeft: 16, paddingRight: 16 },
+        root: {
+          borderRadius: 8,
+          fontWeight: 500,
+          paddingLeft: 16,
+          paddingRight: 16,
+          // TailAdmin 버튼 규약: 키보드 포커스에 브랜드 포커스 링
+          '&.Mui-focusVisible': { boxShadow: ui.shadow.focusRing }
+        },
         contained: {
           boxShadow: ui.shadow.xs,
           '&:hover': { boxShadow: ui.shadow.xs }
@@ -116,7 +125,7 @@ export const theme = createTheme({
         root: {
           borderRadius: 8,
           margin: '1px 0',
-          fontSize: 14.5,
+          fontSize: 15.5,
           fontWeight: 500,
           color: ui.gray[700],
           '&:hover': { backgroundColor: ui.gray[100] },
@@ -134,7 +143,7 @@ export const theme = createTheme({
     MuiTooltip: {
       defaultProps: { arrow: true, enterDelay: 500 },
       styleOverrides: {
-        tooltip: { backgroundColor: ui.gray[800], borderRadius: 8, fontSize: 12.5, fontWeight: 500, padding: '6px 10px' },
+        tooltip: { backgroundColor: ui.gray[800], borderRadius: 8, fontSize: 13.5, fontWeight: 500, padding: '7px 12px' },
         arrow: { color: ui.gray[800] }
       }
     },
@@ -164,7 +173,7 @@ export const theme = createTheme({
     },
     MuiSelect: {
       styleOverrides: {
-        select: { fontSize: 14.5 }
+        select: { fontSize: 15.5 }
       }
     }
   }

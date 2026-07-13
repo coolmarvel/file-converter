@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { detectFileKind, kindFromExtension, extFor } from '../src/core/fileTypes'
 import { targetsFor, canConvert, IMAGE_OUTPUTS } from '../src/core/conversions'
 import { encodeBmp } from '../src/core/bmp'
+import { encodeIco } from '../src/core/ico'
 
 test('매직 바이트로 형식 감지', () => {
   assert.equal(detectFileKind('a.bin', new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])), 'pdf')
@@ -11,6 +12,11 @@ test('매직 바이트로 형식 감지', () => {
   assert.equal(detectFileKind('a.bin', new Uint8Array([0x42, 0x4d, 0x36, 0x00])), 'bmp')
   assert.equal(detectFileKind('a.bin', new TextEncoder().encode('GIF89a....')), 'gif')
   assert.equal(detectFileKind('a.bin', new TextEncoder().encode('\x00\x00\x00 ftypavif....')), 'avif')
+  assert.equal(detectFileKind('a.bin', new TextEncoder().encode('\x00\x00\x00 ftypheic....')), 'heic')
+  assert.equal(detectFileKind('a.bin', new TextEncoder().encode('\x00\x00\x00 ftypmif1....')), 'heic')
+  assert.equal(detectFileKind('a.bin', new TextEncoder().encode('II*\x00....')), 'tiff')
+  assert.equal(detectFileKind('a.bin', new TextEncoder().encode('MM\x00*....')), 'tiff')
+  assert.equal(detectFileKind('a.bin', new Uint8Array([0x00, 0x00, 0x01, 0x00, 0x02, 0x00])), 'ico')
   assert.equal(detectFileKind('a.bin', new TextEncoder().encode('<?xml version="1.0"?>\n<svg xmlns=')), 'svg')
 })
 
@@ -40,15 +46,44 @@ test('변환 경로: PDF는 이미지로, 이미지는 PDF/이미지 출력 포�
   assert.ok(!pngTargets.includes('dicom' as never))
 })
 
-test('읽기 전용 포맷(GIF/SVG/AVIF)도 입력이면 변환 대상이 있다', () => {
-  for (const kind of ['gif', 'svg', 'avif'] as const) {
+test('읽기 전용 포맷(GIF/AVIF/HEIC/TIFF)도 입력이면 변환 대상이 있다', () => {
+  for (const kind of ['gif', 'avif', 'heic', 'tiff'] as const) {
     const tos = targetsFor(kind).map((t) => t.to)
     assert.ok(tos.includes('pdf'))
     assert.ok(tos.includes('png'))
-    // 단, 읽기 전용 포맷 자신은 출력 대상이 아니다
-    assert.ok(!tos.includes(kind))
+    // 단, 래스터 재저장 대상엔 자기 자신이 없다 (IMAGE_OUTPUTS 밖)
+    assert.ok(!IMAGE_OUTPUTS.includes(kind))
     assert.ok(canConvert(kind))
   }
+})
+
+test('특수 출력: 이미지 소스는 ICO/SVG 벡터화 대상이 있고, SVG 소스는 SVG 벡터화가 없다', () => {
+  const pngTos = targetsFor('png').map((t) => t.to)
+  assert.ok(pngTos.includes('ico'))
+  assert.ok(pngTos.includes('svg'))
+  const svgTos = targetsFor('svg').map((t) => t.to)
+  assert.ok(svgTos.includes('ico'))
+  assert.ok(!svgTos.includes('svg'))
+})
+
+test('ICO 인코더: 헤더·엔트리·PNG 임베드', () => {
+  const png1 = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3])
+  const png2 = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9])
+  const ico = encodeIco([
+    { size: 256, png: png1 },
+    { size: 16, png: png2 }
+  ])
+  const view = new DataView(ico.buffer)
+  assert.equal(view.getUint16(2, true), 1) // type = icon
+  assert.equal(view.getUint16(4, true), 2) // count
+  assert.equal(ico[6], 0) // 256 → 0 표기
+  assert.equal(ico[6 + 16], 16)
+  const off1 = view.getUint32(6 + 12, true)
+  assert.equal(off1, 6 + 32) // 헤더 뒤부터 데이터
+  assert.deepEqual([...ico.subarray(off1, off1 + png1.length)], [...png1])
+  const off2 = view.getUint32(6 + 16 + 12, true)
+  assert.deepEqual([...ico.subarray(off2, off2 + png2.length)], [...png2])
+  assert.equal(ico.length, 6 + 32 + png1.length + png2.length)
 })
 
 test('이미지→PDF는 여러 장 합치기(merges)', () => {

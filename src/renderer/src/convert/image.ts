@@ -125,27 +125,47 @@ export function applyCrop(canvas: HTMLCanvasElement, crop?: CropRect | null): HT
   return out
 }
 
+/**
+ * 흰색(밝은) 배경 픽셀을 투명하게 — 그림판식 "배경 투명" (in-place).
+ * tolerance: 0~100(%). 흰색에서 얼마나 먼 색까지 배경으로 볼지. 경계는 부드럽게(feather).
+ */
+export function removeWhiteBg(canvas: HTMLCanvasElement, tolerance: number): void {
+  const ctx = canvas.getContext('2d')!
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const d = imageData.data
+  const thr = Math.max(0, Math.min(100, tolerance)) * 2.55 // 흰색과의 거리 임계값
+  const feather = 25 // 임계값 근처를 부드럽게 반투명 처리
+  for (let i = 0; i < d.length; i += 4) {
+    const dist = 255 - Math.min(d[i], d[i + 1], d[i + 2]) // 흰색에서 가장 먼 채널 기준
+    if (dist <= thr) d[i + 3] = 0
+    else if (dist <= thr + feather) d[i + 3] = Math.round((d[i + 3] * (dist - thr)) / feather)
+  }
+  ctx.putImageData(imageData, 0, 0)
+}
+
+/** 투명도를 담을 수 있는 출력인지 (jpeg/bmp는 흰 배경으로 합쳐진다) */
+export function supportsAlpha(kind: FileKind): boolean {
+  return kind === 'png' || kind === 'webp' || kind === 'ico' || kind === 'svg'
+}
+
 export interface ImageConvertOpts {
   resize?: ResizeOpts
   /** 0~1. jpeg/webp 인코딩 품질 (기본 0.92) */
   quality?: number
   transform?: Transform
   crop?: CropRect | null
+  /** 흰색 배경 → 투명 (0~100 허용 오차). null/undefined = 끔 */
+  whiteTolerance?: number | null
   watermark?: WatermarkOpts
   sig?: HTMLImageElement
 }
 
 /**
- * 이미지 → 지정 포맷 이미지.
- * 처리 순서: 리사이즈 → 회전/반전/흑백 → 자르기 → 워터마크(잘린 결과 기준, 항상 정방향) → 인코딩.
+ * 공용 렌더 파이프라인: 리사이즈 → 회전/반전/흑백 → 자르기 → 흰색제거 → 워터마크.
  * 미리보기(Preview)와 순서·좌표계가 같아야 한다 — 보이는 그대로가 결과물.
+ * opaque=true(jpeg/bmp)면 흰 배경을 먼저 칠하고 흰색제거는 건너뛴다.
  */
-export async function convertImageFormat(
-  bytes: Uint8Array,
-  fromMime: string,
-  toKind: FileKind,
-  opts: ImageConvertOpts = {}
-): Promise<Uint8Array> {
+export async function renderToCanvas(bytes: Uint8Array, fromMime: string, opts: ImageConvertOpts, opaque: boolean): Promise<HTMLCanvasElement> {
   const img = await loadImage(bytes, fromMime)
   const natW = img.naturalWidth || img.width
   const natH = img.naturalHeight || img.height
@@ -157,8 +177,7 @@ export async function convertImageFormat(
   canvas.width = swap ? height : width
   canvas.height = swap ? width : height
   const ctx = canvas.getContext('2d')!
-  // JPEG/BMP는 투명도가 없으므로 흰 배경을 먼저 칠한다
-  if (toKind === 'jpeg' || toKind === 'bmp') {
+  if (opaque) {
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
   }
@@ -170,6 +189,64 @@ export async function convertImageFormat(
   ctx.drawImage(img, -width / 2, -height / 2, width, height)
   ctx.restore()
   canvas = applyCrop(canvas, opts.crop)
+  if (!opaque && opts.whiteTolerance != null) removeWhiteBg(canvas, opts.whiteTolerance)
   if (opts.watermark) drawWatermark(canvas.getContext('2d')!, canvas.width, canvas.height, opts.watermark, opts.sig)
+  return canvas
+}
+
+/** 이미지 → 지정 래스터 포맷 이미지 */
+export async function convertImageFormat(
+  bytes: Uint8Array,
+  fromMime: string,
+  toKind: FileKind,
+  opts: ImageConvertOpts = {}
+): Promise<Uint8Array> {
+  const canvas = await renderToCanvas(bytes, fromMime, opts, !supportsAlpha(toKind))
   return encodeCanvas(canvas, toKind, opts.quality)
+}
+
+/** 이미지 → SVG (imagetracer 벡터 트레이싱 — 로고·단순 이미지용) */
+export async function convertImageToSvg(bytes: Uint8Array, fromMime: string, opts: ImageConvertOpts = {}): Promise<Uint8Array> {
+  const { default: ImageTracer } = await import('imagetracerjs')
+  const canvas = await renderToCanvas(bytes, fromMime, opts, false)
+  // 트레이싱 비용 상한: 긴 변 1200px로 축소 (벡터화 품질엔 충분)
+  let src = canvas
+  const long = Math.max(canvas.width, canvas.height)
+  if (long > 1200) {
+    const k = 1200 / long
+    const small = document.createElement('canvas')
+    small.width = Math.max(1, Math.round(canvas.width * k))
+    small.height = Math.max(1, Math.round(canvas.height * k))
+    small.getContext('2d')!.drawImage(canvas, 0, 0, small.width, small.height)
+    src = small
+  }
+  const ctx = src.getContext('2d')!
+  const svg = ImageTracer.imagedataToSVG(ctx.getImageData(0, 0, src.width, src.height), {
+    numberofcolors: 16,
+    pathomit: 8,
+    scale: 1
+  })
+  return new TextEncoder().encode(svg)
+}
+
+/** 이미지 → ICO (16~256 멀티사이즈 PNG 임베드, 정사각 fit-contain) */
+export async function convertImageToIco(bytes: Uint8Array, fromMime: string, opts: ImageConvertOpts = {}): Promise<Uint8Array> {
+  const { encodeIco, ICO_SIZES } = await import('@core/index')
+  const canvas = await renderToCanvas(bytes, fromMime, opts, false)
+  const long = Math.max(canvas.width, canvas.height)
+  // 원본보다 큰 크기로 업스케일하지 않는다 (단, 최소 1개는 보장)
+  const sizes = ICO_SIZES.filter((s) => s <= Math.max(long, 16))
+  const entries: { size: number; png: Uint8Array }[] = []
+  for (const size of sizes.length ? sizes : [16]) {
+    const square = document.createElement('canvas')
+    square.width = size
+    square.height = size
+    const sctx = square.getContext('2d')!
+    const k = Math.min(size / canvas.width, size / canvas.height)
+    const w = Math.max(1, Math.round(canvas.width * k))
+    const h = Math.max(1, Math.round(canvas.height * k))
+    sctx.drawImage(canvas, Math.round((size - w) / 2), Math.round((size - h) / 2), w, h)
+    entries.push({ size, png: await canvasToBytes(square, 'image/png') })
+  }
+  return encodeIco(entries)
 }

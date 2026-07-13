@@ -1,6 +1,21 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join, basename } from 'path'
+import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net } from 'electron'
+import { join, basename, normalize } from 'path'
 import { writeFile, mkdir } from 'fs/promises'
+import { pathToFileURL } from 'url'
+
+// ── AI 배경 제거 모델 서빙 (bgrm://) ─────────────────────────────────────
+// @imgly/background-removal 은 모델·wasm 을 fetch(publicPath + …)로 가져온다.
+// 패키징 시 extraResources 로 resources/bgrm-data 에 풀어두고(asar 밖) 커스텀
+// 프로토콜로 서빙 → 완전 오프라인. 등록은 app ready 전에 해야 한다.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'bgrm', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+])
+
+function bgrmDataDir(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'bgrm-data')
+    : join(app.getAppPath(), 'node_modules/@imgly/background-removal-data/dist')
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -84,6 +99,19 @@ ipcMain.handle('shell:showItem', async (_e, fullPath: string) => {
 })
 
 app.whenReady().then(() => {
+  // bgrm://assets/<파일> → bgrm-data 디렉터리의 파일 (경로 탈출 방지, CORS 허용 응답)
+  protocol.handle('bgrm', async (request) => {
+    const url = new URL(request.url)
+    const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '')
+    const base = bgrmDataDir()
+    const full = normalize(join(base, rel))
+    if (!full.startsWith(normalize(base))) return new Response('forbidden', { status: 403 })
+    const res = await net.fetch(pathToFileURL(full).toString())
+    const headers = new Headers(res.headers)
+    headers.set('Access-Control-Allow-Origin', '*')
+    return new Response(res.body, { status: res.status, headers })
+  })
+
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

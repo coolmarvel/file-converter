@@ -18,12 +18,12 @@ export default function TopBar({ busy, fileCount, canConvert, onConvert }: TopBa
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', px: 2, py: 1, bgcolor: '#fff', borderBottom: 1, borderColor: 'divider', gap: 2 }}>
       <Stack direction="row" spacing={0.8} alignItems="center">
-        <Box component="img" src={appIconUrl} alt="" sx={{ width: 26, height: 26 }} />
-        <Typography fontWeight={800} sx={{ whiteSpace: 'nowrap' }}>
+        <Box component="img" src={appIconUrl} alt="" sx={{ width: 30, height: 30 }} />
+        <Typography fontWeight={800} sx={{ whiteSpace: 'nowrap', fontSize: 19 }}>
           파일 변환기
         </Typography>
       </Stack>
-      <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+      <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap', fontSize: 14 }}>
         PDF · 이미지 · 오프라인
       </Typography>
 
@@ -35,7 +35,7 @@ export default function TopBar({ busy, fileCount, canConvert, onConvert }: TopBa
         startIcon={<SwapHorizRounded />}
         disabled={busy || !canConvert}
         onClick={onConvert}
-        sx={{ borderRadius: 99, px: 3 }}
+        sx={{ borderRadius: 99, px: 3.2, py: 1, fontSize: 15.5 }}
       >
         {busy ? '변환 중…' : fileCount > 0 ? `${fileCount}개 변환 후 저장` : '변환 후 저장'}
       </Button>

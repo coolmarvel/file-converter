@@ -9,4 +9,6 @@ export interface AppFile {
   bytes: Uint8Array
   /** 이미지/PDF 미리보기용 object URL (없으면 미생성) */
   previewUrl?: string
+  /** 원래 포맷 (HEIC/TIFF는 추가 시점에 PNG로 풀어서 kind='png'가 되므로 배지 표시용으로 보관) */
+  srcKind?: FileKind
 }

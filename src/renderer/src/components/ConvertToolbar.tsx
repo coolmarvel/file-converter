@@ -12,11 +12,13 @@ import ImageOutlined from '@mui/icons-material/ImageOutlined'
 import PhotoOutlined from '@mui/icons-material/PhotoOutlined'
 import CollectionsOutlined from '@mui/icons-material/CollectionsOutlined'
 import InsertPhotoOutlined from '@mui/icons-material/InsertPhotoOutlined'
+import WebAssetRounded from '@mui/icons-material/WebAssetRounded'
+import PolylineOutlined from '@mui/icons-material/PolylineOutlined'
 import { FileKind, FORMATS, ConversionTarget } from '@core/index'
 
-/** 모든 툴 버튼 규격 통일 (pdf-editor ToolBtn): 본체 76×48px 고정 — 라벨 길이와 무관하게 같은 박스 */
-const TOOLBTN_W = 76
-const TOOLBTN_H = 48
+/** 모든 툴 버튼 규격 통일 (pdf-editor ToolBtn): 본체 84×54px 고정 — 라벨 길이와 무관하게 같은 박스 (2026-07-13 확대) */
+const TOOLBTN_W = 84
+const TOOLBTN_H = 54
 
 function ToolBtn({
   label,
@@ -53,10 +55,10 @@ function ToolBtn({
               '&:hover': { bgcolor: active ? 'primary.light' : '#f2f4f7' }
             }}
           >
-            <Box sx={{ display: 'flex', alignItems: 'center', height: 24 }}>{icon}</Box>
+            <Box sx={{ display: 'flex', alignItems: 'center', height: 26, '& svg': { fontSize: 26 } }}>{icon}</Box>
             <Typography
               variant="caption"
-              sx={{ fontSize: 11.5, lineHeight: 1.15, mt: 0.2, whiteSpace: 'nowrap', maxWidth: TOOLBTN_W - 4, overflow: 'hidden', textOverflow: 'ellipsis' }}
+              sx={{ fontSize: 12.5, lineHeight: 1.15, mt: 0.3, whiteSpace: 'nowrap', maxWidth: TOOLBTN_W - 4, overflow: 'hidden', textOverflow: 'ellipsis' }}
             >
               {label}
             </Typography>
@@ -72,7 +74,9 @@ const TARGET_ICONS: Partial<Record<FileKind, JSX.Element>> = {
   png: <ImageOutlined />,
   jpeg: <PhotoOutlined />,
   webp: <CollectionsOutlined />,
-  bmp: <InsertPhotoOutlined />
+  bmp: <InsertPhotoOutlined />,
+  ico: <WebAssetRounded />,
+  svg: <PolylineOutlined />
 }
 
 export interface ConvertToolbarProps {

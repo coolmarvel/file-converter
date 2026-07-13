@@ -5,7 +5,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument, degrees } from 'pdf-lib'
 import { FileKind, extFor } from '@core/index'
-import { canvasToBytes, mimeFor, convertImageFormat, encodeCanvas, loadImage, targetSize, ResizeOpts, CropRect, applyCrop } from './image'
+import { canvasToBytes, mimeFor, convertImageFormat, encodeCanvas, loadImage, targetSize, ResizeOpts, CropRect, applyCrop, removeWhiteBg, supportsAlpha } from './image'
 import { WatermarkOpts, drawWatermark } from '../watermark/model'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -60,6 +60,8 @@ export interface PdfToImagesOpts {
   quality?: number
   /** 페이지에서 잘라낼 영역 (미리보기 화면 기준 정규화) */
   crop?: CropRect | null
+  /** 흰색 배경 → 투명 (png/webp 대상일 때만 의미) */
+  whiteTolerance?: number | null
   watermark?: WatermarkOpts
   sig?: HTMLImageElement
 }
@@ -101,6 +103,7 @@ export async function pdfToImages(bytes: Uint8Array, toKind: FileKind, baseName:
     }
     canvas = applyCrop(canvas, opts.crop)
     ctx = canvas.getContext('2d')!
+    if (supportsAlpha(toKind) && opts.whiteTolerance != null) removeWhiteBg(canvas, opts.whiteTolerance)
     if (opts.watermark) drawWatermark(ctx, canvas.width, canvas.height, opts.watermark, opts.sig)
     const pageNo = String(idx + 1).padStart(3, '0')
     out.push({ name: `${baseName}_p${pageNo}.${ext}`, bytes: await encodeCanvas(canvas, toKind, opts.quality) })

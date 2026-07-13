@@ -11,6 +11,74 @@ updated: 2026-07-13
 
 ---
 
+## 2026-07-13 (세션 8-g) — UI/UX 확대·폴리시 + 번들 최적화 + 데드코드 정리 (v1.3.1)
+
+사용자: v1.3.0 확인(AI 배경 제거 "감탄"). 지시: TailAdmin 폴더(임시 업로드)에서 UI 컴포넌트를
+학습해 UI/UX 업그레이드, 폰트 전반 확대, 코드 공통화·모듈화로 최적화, 불필요 기능 제거.
+기존 기능은 깨지면 안 됨. 학습 후 tailadmin* 폴더 삭제(git 미포함).
+
+**TailAdmin 학습 결과**: 우리 theme.ts가 이미 TailAdmin 계열(pdf-editor 경유 — 회색 스케일·섀도 동일)임을
+확인. 가져온 것: 크기 체계(버튼 px-5/py-3.5·rounded-lg), 포커스 링 규약, 빈 상태(empty state)의
+브랜드 틴트 원형 아이콘 배지, 카드 라운드 문법.
+
+**한 일**
+- **크기 전반 확대** (사용자 "폰트가 작다"): 기본 폰트 15→16, caption 13→13.5, MenuItem/Select 14.5→15.5,
+  Tooltip 12.5→13.5, 컨트롤 높이 CTL_H 36→40, ToolBtn 76×48→84×54(아이콘 26px), 옵션바 52→58,
+  TopBar 타이틀 19px·변환 버튼 확대, 사이드바 296→312(카드 글자·배지·썸네일 확대), 미리보기 줌 표기 확대.
+- **폴리시**: 버튼·칩에 키보드 포커스 링(`Mui-focusVisible`), DropZone을 TailAdmin 빈 상태 문법
+  (브랜드 원형 아이콘 배지 88px + 큰 타이포)으로.
+- **공통화/모듈화**: `bar.tsx`에 `ToggleChip`/`IconToggle` 공용 부품 신설(OptionsBar 로컬 구현 제거),
+  App 저장 흐름 3중복 → `saveResults()` 하나로.
+- **번들 최적화**: pdf.js+pdf-lib(1,318KB)를 **지연 로딩 청크로 분리** — Preview는 PDF 소스일 때만,
+  convert/index는 PDF 분기에서만, pdftools는 실행 시에만 import (타입은 `import type`).
+  **시작 청크 2,389KB → 941KB.** heic2any/utif2/imagetracer/bgremove는 이미 지연 로딩.
+- **데드코드 제거**: core `PDF_OPS`/`PdfOpInfo`(UI가 붙으며 무용), convert/index의 supportsAlpha 재수출.
+- 검증: typecheck ✅ / test 9 ✅ / build ✅ + **전체 회귀 Playwright 35/35**
+  (fit 7·wm 4·drop 3·crop 9·v13 12 — 기존 스크립트 전부 재실행) + **Electron AI 5/5** 재확인.
+- v1.3.0 → **v1.3.1**. tailadmin-nextjs-pro-225 폴더 학습 후 삭제.
+- (후속) **`docs/guides/packaging.md` 신설**: pdf-editor의 맥(Intel x64/Apple Silicon arm64) 빌드
+  가이드 이식 — 한글 내부명 크래시 사고·ad-hoc 서명·dist-mac.cjs 이식 필요 등. 맥 빌드는 환경상 미실행(todo P4).
+
+**현재 상태**: v1.3.0 기능 전부 동작(회귀 검증), UI 확대·경량 시작. 인스톨러 구움.
+**다음**: 사용자 설치 테스트.
+
+---
+
+## 2026-07-13 (세션 8-f) — 대규모 기능 확장: 배경 제거·HEIC/TIFF·ICO/SVG·PDF 도구·로딩바 (v1.3.0)
+
+사용자: 기능 추천 논의 후 "1~3차 전부 + HEIC/TIFF + ICO + 로딩바까지 한 번에. 인스톨러 크기 무관".
+
+**한 일**
+- **배경 처리** (OptionsBar [배경] select — 미리보기 즉시 반영, 체커보드로 투명 표시):
+  - **흰색 → 투명**: `image.ts removeWhiteBg`(허용 오차 1~60% + feather). 투명도 가능한 출력
+    (png/webp/ico/svg = `supportsAlpha`)에서만 활성. PDF→이미지에도 적용. 미리보기는 Preview에서
+    같은 픽셀 연산을 디바운스 적용(2000px 상한 축소본).
+  - **AI 배경 제거**: `@imgly/background-removal` **1.4.5** (⚠️ 모델 npm 패키지
+    `@imgly/background-removal-data`가 1.4.5까지만 배포 — 라이브러리를 데이터와 같은 버전으로 고정.
+    최신 1.7은 자사 CDN 전용이라 오프라인 불가). 모델·wasm 354MB를 **extraResources → resources/bgrm-data**로
+    번들하고 main의 **bgrm:// 커스텀 프로토콜**(standard+supportFetchAPI+CORS 응답)로 서빙 → 완전 오프라인.
+    렌더러 CSP에 `connect-src bgrm:` + `script-src 'unsafe-eval' 'wasm-unsafe-eval'` 필요(onnxruntime-web).
+    BMP 등 imgly 미지원 입력은 PNG로 정규화 후 투입. 결과는 `aiCache`(fileId→PNG)에 캐시 —
+    미리보기(App aiUrls)와 변환이 공유, 이력(undo) 대상 아님.
+- **입력 확장**: **HEIC/HEIF**(heic2any=libheif 내장)·**TIFF**(utif2) — 추가 시점에 PNG로 디코드
+  (`convert/decode.ts`), 원래 포맷은 `AppFile.srcKind`로 배지에만. ICO도 입력 허용(브라우저 네이티브 디코드).
+- **출력 확장**: **ICO**(core/ico.ts — PNG 임베드 멀티사이즈 16~256, 정사각 contain, 테스트 포함),
+  **SVG 벡터화**(imagetracerjs, 16색, 긴 변 1200px 상한 — 로고용. 워터마크 비적용·UI 안내).
+- **PDF 문서 정리 UI**: OptionsBar [전체 병합](2개↑) + [페이지 도구] 팝오버(분할/회전/삭제/순서변경,
+  "1,3-5" 파싱 = `convert/pdftools.ts`, 구현은 기존 pdf.ts 함수) — todo P3 해소.
+- **Ctrl+V 붙여넣기**: 클립보드 이미지(스크린샷)를 파일로 추가.
+- **로딩바**: `progress` 상태 → 하단 중앙 Paper(CircularProgress+LinearProgress).
+  AI 모델 로드/추론, 파일 n/m 변환, HEIC/TIFF 디코드, PDF 도구에 연결(`ConvertOptions.onProgress`).
+- 검증: typecheck ✅ / core 테스트 9종 ✅ / build ✅ + **Playwright 렌더러 12/12**(흰색→투명 픽셀·
+  ICO/SVG 출력·TIFF 입력·Ctrl+V·PDF 병합/회전/분할) + **Playwright _electron 5/5**(실제 앱에서
+  bgrm:// 매니페스트 서빙, 로딩바 표시, AI 추론 후 미리보기 교체, 모서리 투명/중앙 유지 픽셀 검사).
+- v1.2.0 → **v1.3.0**. 인스톨러가 모델 포함으로 **수백 MB로 커짐** — 사용자 승인("얼마나 커지든 상관 없어").
+
+**현재 상태**: 전 기능 동작. 인스톨러 굽는 중.
+**다음**: 사용자 설치 테스트(특히 AI 배경 제거 실사진, HEIC 아이폰 사진). SVG 벡터화는 사진에 부적합함을 안내함.
+
+---
+
 ## 2026-07-13 (세션 8-e) — 자르기 + undo/redo (v1.2.0, 사용자가 1.2.0 선언)
 
 사용자 확인: v1.1.4 기능 이상 없음. 새 요청: "그림판 자르기처럼 특정 부분만 도려내고,
