@@ -13,6 +13,7 @@ export function DropZone({ onFiles }: { onFiles: (files: File[]) => void }): JSX
 
   const handleDrop = (e: DragEvent): void => {
     e.preventDefault()
+    e.stopPropagation() // 본문 전체 드롭 핸들러(App)로 전파되면 같은 파일이 두 번 추가된다
     setOver(false)
     onFiles(Array.from(e.dataTransfer.files))
   }
@@ -43,7 +44,7 @@ export function DropZone({ onFiles }: { onFiles: (files: File[]) => void }): JSX
         <CloudUploadOutlined sx={{ fontSize: 56, color: over ? ui.brand[500] : ui.gray[400] }} />
         <Typography sx={{ fontWeight: 700, fontSize: 17 }}>파일을 여기에 끌어다 놓거나 클릭해서 추가하세요</Typography>
         <Typography variant="caption" color="text.secondary">
-          PDF · PNG · JPEG · WebP · DICOM (여러 개 가능)
+          PDF · PNG · JPEG · WebP · BMP · GIF · SVG · AVIF (여러 개 가능)
         </Typography>
         <Button
           variant="contained"
@@ -60,7 +61,7 @@ export function DropZone({ onFiles }: { onFiles: (files: File[]) => void }): JSX
         ref={inputRef}
         type="file"
         multiple
-        accept=".pdf,.png,.jpg,.jpeg,.webp,.dcm,.dicom"
+        accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.svg,.avif"
         style={{ display: 'none' }}
         onChange={(e) => {
           if (e.target.files) onFiles(Array.from(e.target.files))

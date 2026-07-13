@@ -1,6 +1,5 @@
 /**
  * 워터마크 데이터 모델 + 캔버스 렌더. 변환 출력(이미지/PDF 페이지)에 공통 적용.
- * DICOM은 대상에서 제외.
  */
 
 export type WmLayout = 'diagonal' | 'tile' | 'corner'
@@ -24,7 +23,7 @@ export const DEFAULT_WATERMARK: WatermarkOpts = {
   type: 'text',
   text: '이성현',
   color: '#888888',
-  opacity: 0.22,
+  opacity: 0.35, // pdf-editor 기본과 동일 — 0.22는 사진 위에서 안 보여 "적용 안 됨"으로 오인(2026-07-13 피드백)
   sizePct: 22,
   layout: 'diagonal',
   rotationDeg: -30,

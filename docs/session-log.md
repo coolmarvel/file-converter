@@ -1,13 +1,153 @@
 ---
 title: 세션 진행 로그
 created: 2026-07-07
-updated: 2026-07-10
+updated: 2026-07-13
 ---
 
 # 세션 진행 로그
 
 > **이 파일이 "무슨 일이 언제 있었나"의 SSOT다** (2026-07-09 git 도입 후에도 유지 — git log는 보조, writing-guide 참고).
 > 새 세션은 이 파일부터 읽는다. 세션마다 최상단에 블록을 추가한다. 형식: 날짜 / 한 일 / 현재 상태 / 다음.
+
+---
+
+## 2026-07-13 (세션 8-e) — 자르기 + undo/redo (v1.2.0, 사용자가 1.2.0 선언)
+
+사용자 확인: v1.1.4 기능 이상 없음. 새 요청: "그림판 자르기처럼 특정 부분만 도려내고,
+어디까지 잘리는지 미리보기로 보여줘. undo/redo도 Ctrl+Z 키보드 포함해서."
+
+**한 일**
+- **자르기(crop)**:
+  - 모델: `CropRect`(0~1 정규화) — **리사이즈·회전이 반영된 미리보기 화면 기준 좌표**.
+    파이프라인 순서 리사이즈→회전→**자르기**→워터마크(`convert/image.ts` `applyCrop`, pdfToImages 동일)라
+    미리보기에 보이는 그대로 잘린다. 워터마크는 잘린 결과물 기준 배치(미리보기도 crop 영역 안에 오버레이).
+  - UI: OptionsBar [자르기] 토글 칩(영역 있으면 `50×50%`식 크기 표시 + × 해제 버튼).
+    Preview `CropLayer` — 드래그로 새 영역, 안쪽 드래그 = 이동, 모서리 핸들 4개 = 크기 조절,
+    바깥은 box-shadow dim(잘려나갈 부분). 포인터 캡처 + 프레임 정규화 좌표라 줌 배율 무관.
+  - 적용 범위: 이미지 소스(이미지→이미지/PDF) + PDF→이미지(전 페이지 동일 영역).
+- **undo/redo**:
+  - `Snapshot`(files·activeId·target·scale·resize·quality·tf·crop·wm) 단위 이력, 최대 100칸.
+    상태 변경을 400ms 디바운스로 커밋 → 슬라이더 드래그·자르기 드래그·연속 타이핑이 이력 1칸.
+  - undo/redo 시 `restoring` ref로 재기록 방지. 파일 삭제 복원을 위해 removeFile의
+    previewUrl revoke 제거(URL은 앱 종료 시 해제 — undo로 살릴 때 필요).
+  - 트리거: ConvertToolbar [실행취소]/[다시실행] 버튼(비활성 상태 반영) + **Ctrl+Z / Ctrl+Y(또는 Ctrl+Shift+Z)**.
+    입력창 포커스 중엔 네이티브 undo에 양보.
+- 검증: typecheck ✅ / test 7/7 ✅ / build ✅ + Playwright 9/9
+  (드래그로 50×50% 선택→칩 표시·점선+dim, 변환 결과 실제 1200×200, Ctrl+Z/Y로 자르기 취소·복원,
+  회전 undo, 파일 삭제 undo 복원). 프로세스 정리 확인.
+- v1.1.4 → **v1.2.0** (사용자 지시).
+
+**현재 상태**: 자르기·undo/redo 동작. 인스톨러 구움.
+**다음**: 사용자 설치 테스트.
+
+---
+
+## 2026-07-13 (세션 8-d) — 드래그&드롭 파일 중복 추가 수정 (v1.1.4)
+
+사용자 피드백: "탐색기(파일 선택)로는 1장 추가되는데, 끌어다 놓으면 2장이 추가된다."
+
+**원인**: 파일이 없을 때 랜딩 `DropZone`이 본문 안에 렌더되는데, App의 본문 Box에도
+"어디에나 끌어다 놓으면 추가" 핸들러가 있다. DropZone의 onDrop이 `stopPropagation()`을
+안 해서 이벤트가 App 핸들러로 버블링 → `addFiles`가 두 번 실행돼 같은 파일이 2장 추가.
+(v1.1.0에서 본문 전체 드롭을 도입할 때 생긴 버그. input[type=file] 경로는 핸들러가 하나라 정상.)
+
+**수정**: `DropZone.tsx` handleDrop에 `e.stopPropagation()` 한 줄.
+검증: typecheck ✅ / test 7/7 ✅ / build ✅ + Playwright 3/3 (DataTransfer로 실제 drop 이벤트
+디스패치 — 랜딩 드롭존 1장, 파일 있는 상태 본문 드롭 1장, 배지 합계 2). v1.1.3 → **v1.1.4**.
+
+참고(작업 방식): 이전 정리 실패 원인 규명 — `pkill -f "<경로>"` 패턴이 pkill을 실행하는 셸
+자신의 커맨드라인과 매치돼 셸이 먼저 죽고(exit 144) 후속 정리가 안 돌았음. 이후 브래킷 트릭
+(`pkill -f "[e]lectron/dist/electron"`)으로 정리하고 잔여 0개 확인을 규칙화(메모리에도 기록).
+
+**현재 상태**: 드롭 추가 정상(1장씩). 인스톨러 구움.
+**다음**: 사용자 설치 테스트 (v1.1.1~1.1.4 누적: DICOM 제거, 포맷·옵션 확장, 화면맞춤, WYSIWYG 미리보기, 드롭 수정).
+
+---
+
+## 2026-07-13 (세션 8-c) — 변환 옵션 전부 미리보기 실시간 반영 + 워터마크 기본 진하기 (v1.1.3)
+
+사용자 피드백(v1.1.2 설치 후, 채팅): "워터마크 적용해서 변환 저장했는데 적용이 안 된 것 같다.
+미리보기에서 확인하고 싶다. pdf 편집기처럼 미리 보여줘."
+
+**진단**: 워터마크 오버레이·결과물 합성은 정상 동작 중이었음(Playwright 픽셀 검증으로 확인 —
+오버레이 canvas painted, PNG 출력에 워터마크 픽셀 존재). 실제 원인 두 가지:
+① 기본 진하기 0.22 + 회색이 **사진 위에서 사실상 안 보임** → "적용 안 됨"으로 오인.
+② 회전·반전·흑백·크기 옵션은 미리보기에 미반영(P3) → 적용 여부를 확인할 방법이 없었음.
+
+**한 일**
+- `DEFAULT_WATERMARK.opacity` 0.22 → **0.35** (pdf-editor `watermarkStyle` 기본과 동일).
+- **미리보기에 변환 옵션 실시간 반영** (`Preview.tsx` — todo P3 해소):
+  - props에 `transform`/`resize` 추가. App이 변환과 **같은 상태값**을 넘긴다(리사이즈 계산도 공용화).
+  - 리사이즈(비율 강제 포함) → `targetSize`로 유효 크기 계산 후 화면맞춤 배율 산정.
+  - 회전 90°단위 = 프레임 가로/세로 스왑 + img CSS `rotate`, 반전 = `scale(±1)`, 흑백 = `filter: grayscale(1)`.
+  - 이미지는 프레임 정중앙 absolute 배치(translate(-50%,-50%) 후 회전) — 워터마크 오버레이는
+    회전된 프레임 위에 정방향으로, 변환 처리 순서(변형→워터마크)와 동일.
+  - transform은 원본이 이미지일 때만(변환 동작과 일치), resize는 PDF→이미지 미리보기에도 비율 반영.
+- 검증: typecheck ✅ / test 7/7 ✅ / build ✅ + Playwright 10/10
+  (오버레이 픽셀·회전 프레임 스왑·grayscale filter·**결과물 JPEG가 실제 1500×300 회전+무채색**·
+  이미지→PDF 워터마크 저장·워터마크 PNG 빨간 픽셀 합성). 프로세스 정리 확인.
+- v1.1.2 → **v1.1.3**.
+
+**현재 상태**: 미리보기 = 결과물(WYSIWYG). 보이는 그대로 저장된다. 인스톨러 구움.
+**다음**: 사용자 설치 테스트. 남은 P3: PDF 문서정리 UI, 형광펜 multiply 등(변화 없음).
+
+---
+
+## 2026-07-13 (세션 8-b) — 미리보기 100% = "화면에 맞춤"(contain)으로 정정 (v1.1.2)
+
+사용자 피드백(스크린샷 4장): v1.1.1의 "100% = 폭맞춤"은 의도와 다름. 세로로 긴 이미지가 화면 밖으로
+넘쳐 40%까지 직접 줄여야 했음. 원하는 것 = **pdf-editor의 레이아웃 → "화면에 맞춤"과 동일하게,
+100%에서 이미지/페이지 전체가 스크롤 없이 미리보기 안에 들어오는 것**.
+
+**한 일** (`Preview.tsx`)
+- 스테이지 **높이까지 측정**(`stage {w,h}`), 이미지 원본 크기(`nat`)를 `<img>` onLoad에서 수집.
+- 100% 배율 = `min(stageW/natW, stageH/natH)` (**contain**) — 가로·세로 중 넘치는 쪽 기준. zoom은 그 배수.
+- 스테이지를 flex로 바꾸고 프레임에 `m:'auto'` → 화면보다 작으면 **가로·세로 정중앙**, 크면(확대) 스크롤.
+- 원본 크기 측정 전 폴백: CSS `maxWidth/maxHeight` contain (원본 픽셀로 새는 순간이 없음).
+- "맞춤" 버튼 = 100% 리셋(툴팁 "화면에 맞춤 (100%)"), nat은 소스 변경 시에만 리셋(페이지 넘김엔 유지).
+- 검증: typecheck ✅ / test 7/7 ✅ / build ✅ + Playwright 7/7 (세로 300×1500·가로 2400×400 BMP로
+  contain·정중앙·확대 시 스크롤·맞춤 복귀 측정. dev 서버·Electron 프로세스는 검증 후 종료 확인 —
+  세션 8에서 Electron이 살아남아 사용자가 지적, 이후 정리 확인을 규칙화).
+- v1.1.1 → **v1.1.2**. 스크린샷 4장 feedback-archive로 이관.
+
+**현재 상태**: 100% = 화면에 맞춤. 인스톨러 구움(v1.1.1은 사용자 설치 전이었으므로 v1.1.2가 첫 확인 대상).
+**다음**: 사용자 설치 테스트 → 스크린샷 피드백.
+
+---
+
+## 2026-07-13 (세션 8) — DICOM 제거 + 포맷·옵션 확장 + 미리보기 폭맞춤 (v1.1.1)
+
+사용자 지시(채팅+스크린샷 1장): ① DICOM 변환은 별도 전용 앱으로 특화 개발할 것이니 관련 기능 전부 제거.
+② 같은 포맷→같은 포맷(예: JPEG→JPEG 크기만 조절) 허용 + 지원 확장자가 너무 적음(pdf/png/webp뿐) + 크기 조절 안 됨.
+③ 컨텍스트 툴바에 워터마크 말고 기능 더 넣을 것. ④ 미리보기 100%는 무조건 미리보기 폭에 딱 맞게.
+
+**한 일**
+- **DICOM 전면 제거**: `convert/dicom.ts`·`DicomForm.tsx`·`dcmjs.d.ts` 삭제, `dcmjs` 의존성 제거,
+  FileKind에서 'dicom' 삭제(감지 시 unknown), `ConversionTarget.needs` 필드 자체 제거(용도가 dicomMeta뿐이었음),
+  App의 환자정보 상태·검사, TopBar/DropZone/Preview 문구 정리. `.dcm`은 이제 "알 수 없음" 처리.
+- **포맷 확장** (`core/fileTypes.ts` + `core/conversions.ts`):
+  - 입력: **BMP·GIF·SVG·AVIF** 추가 (매직 바이트 감지, SVG만 텍스트 "<svg" 마커 — detectFileKind header를 512B로).
+  - 출력 레지스트리 `IMAGE_OUTPUTS` = png/jpeg/webp/bmp (canvas 인코딩 가능 집합 + BMP 자체 인코더).
+    GIF/SVG/AVIF는 **입력 전용**. PDF→이미지에 WebP 추가.
+  - **같은 포맷 대상 허용**: 라벨 "(크기·품질만 조절)". `extFor()` 헬퍼 신설(jpeg→"jpg").
+  - **`core/bmp.ts` 신설**: 24bit BI_RGB BMP 인코더(순수 TS, bottom-up·행 패딩) — canvas.toBlob이 BMP 미지원이라 직접 작성. 테스트 포함.
+- **변환 옵션 확장**: `ConvertOptions`에 `quality`(0~1)·`transform`(rotate 90°단위/flipH/flipV/grayscale) 추가.
+  - `convertImageFormat` 시그니처를 옵션 객체로 변경. 처리 순서: 리사이즈 → 회전/반전/흑백 → 워터마크(정방향) → 인코딩.
+  - `pdfToImages`도 옵션 객체화(+resize·quality): 크기 지정 시 scale 해상도로 렌더 후 축소.
+  - 이미지→PDF: transform/resize 있으면 PNG로 선처리 후 임베드(워터마크는 기존대로 페이지별 합성).
+  - OptionsBar: **품질 슬라이더**(jpeg/webp 대상, 10~100%, 기본 92 — todo P4 "JPEG 품질 옵션" 해소),
+    **회전 ↺↻/좌우·상하 반전/흑백 토글**(원본이 이미지일 때), 크기(px)는 이미지→PDF에도 노출.
+    WmToggle을 공용 `ToggleChip`으로 일반화.
+- **미리보기 100% = 폭맞춤 고정**(`Preview.tsx`): `frameW` 폴백을 원본 크기 → `'100%'`로.
+  스테이지 폭 측정 전(또는 실패 시)에도 원본 픽셀 크기로 새지 않는다. zoom≤1이면 maxWidth 100% 겸용.
+- 검증: typecheck ✅ / test 7/7 ✅(BMP 인코더·새 포맷 감지·같은포맷 경로 추가) / build ✅ +
+  **Playwright 실 렌더러 검증 15/15** (vite dev + chromium, window.api 스텁으로 저장 바이트의 매직 바이트까지 확인:
+  JPEG→JPEG(크기·회전·흑백)/JPEG→BMP/GIF→PNG/SVG→WebP, DICOM 부재, 폭맞춤 측정. 스크립트는 scratchpad 1회용).
+- v1.1.0 → **v1.1.1**. 스크린샷 1장 feedback-archive로 이관.
+
+**현재 상태**: DICOM 없는 순수 PDF·이미지 변환기. 인스톨러 구움. 커밋/푸시는 사용자가 직접.
+**다음**: 사용자 설치 테스트 → 스크린샷 피드백. 미리보기에 리사이즈/회전/흑백 실시간 반영(P3)은 미착수.
+DICOM 전용 변환기 프로젝트는 사용자가 시작 시점 결정.
 
 ---
 

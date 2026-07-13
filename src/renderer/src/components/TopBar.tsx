@@ -24,7 +24,7 @@ export default function TopBar({ busy, fileCount, canConvert, onConvert }: TopBa
         </Typography>
       </Stack>
       <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-        PDF · 이미지 · DICOM · 오프라인
+        PDF · 이미지 · 오프라인
       </Typography>
 
       <Box sx={{ flex: 1 }} />

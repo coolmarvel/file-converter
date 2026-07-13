@@ -9,7 +9,7 @@ domain: conversion
 
 ## 개요
 
-변환 출력물(이미지·PDF)에 텍스트 또는 서명 워터마크를 합성한다. **DICOM 대상에는 적용하지 않는다**.
+변환 출력물(이미지·PDF)에 텍스트 또는 서명 워터마크를 합성한다.
 변환 패널의 "💧 워터마크 넣기"를 켜면 옵션이 나타나고, **미리보기에 실시간 표시**된 뒤 변환 시 결과물에 찍힌다.
 
 ### 미리보기 오버레이 (`components/WatermarkOverlay.tsx`)
@@ -39,7 +39,6 @@ domain: conversion
 - 이미지→이미지: `convert/image.ts` `convertImageFormat(...)` — drawImage 후 `drawWatermark`.
 - 이미지→PDF: `convert/pdf.ts` `imagesToPdf(...)` — 워터마크 있으면 캔버스에 원본+워터마크 그려 PNG 임베드.
 - PDF→이미지: `convert/pdf.ts` `pdfToImages(...)` — 페이지 렌더 후 `drawWatermark`.
-- 이미지→DICOM: 미적용(제외).
 
 렌더는 라이브/내보내기 공통 `drawWatermark(ctx, W, H, opts, sig)`(`watermark/model.ts`).
 

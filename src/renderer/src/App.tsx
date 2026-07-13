@@ -7,7 +7,7 @@ import Alert from '@mui/material/Alert'
 import { detectFileKind, targetsFor, FileKind, FORMATS } from '@core/index'
 import { AppFile } from './types'
 import { runConversion } from './convert'
-import { DicomMeta } from './convert/dicom'
+import { Transform, CropRect } from './convert/image'
 import { WatermarkOpts, DEFAULT_WATERMARK } from './watermark/model'
 import TopBar from './components/TopBar'
 import ConvertToolbar from './components/ConvertToolbar'
@@ -20,8 +20,30 @@ import signUrl from './assets/sign.png'
 
 type Status = { kind: 'info' | 'ok' | 'err'; text: string } | null
 
-const EMPTY_DICOM: DicomMeta = { patientName: '', patientID: '', patientSex: '', modality: 'OT' }
+const DEFAULT_TRANSFORM: Transform = { rotate: 0, flipH: false, flipV: false, grayscale: false }
 let idSeq = 0
+
+/** undo/redo 이력 한 칸 — 작업 결과에 영향을 주는 상태 전부의 스냅샷 (bytes는 불변이라 참조 공유) */
+interface Snapshot {
+  files: AppFile[]
+  activeId: string | null
+  target: FileKind | null
+  scale: number
+  resizeW: string
+  resizeH: string
+  quality: number
+  tf: Transform
+  crop: CropRect | null
+  wm: WatermarkOpts
+}
+
+const HISTORY_MAX = 100
+/** 슬라이더 드래그·연속 타이핑을 이력 한 칸으로 묶는 침묵 시간(ms) */
+const HISTORY_DEBOUNCE = 400
+
+function sameSnapshot(a: Snapshot, b: Snapshot): boolean {
+  return (Object.keys(a) as (keyof Snapshot)[]).every((k) => a[k] === b[k])
+}
 
 export default function App(): JSX.Element {
   const [files, setFiles] = useState<AppFile[]>([])
@@ -30,11 +52,15 @@ export default function App(): JSX.Element {
   const [scale, setScale] = useState(2)
   const [resizeW, setResizeW] = useState('')
   const [resizeH, setResizeH] = useState('')
-  const [dicomMeta, setDicomMeta] = useState<DicomMeta>(EMPTY_DICOM)
+  const [quality, setQuality] = useState(92) // % — jpeg/webp 인코딩 품질
+  const [tf, setTf] = useState<Transform>(DEFAULT_TRANSFORM)
+  const [crop, setCrop] = useState<CropRect | null>(null)
+  const [cropMode, setCropMode] = useState(false)
   const [wm, setWm] = useState<WatermarkOpts>(DEFAULT_WATERMARK)
   const [status, setStatus] = useState<Status>(null)
   const [busy, setBusy] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [histState, setHistState] = useState({ canUndo: false, canRedo: false })
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const commonKind = useMemo<FileKind | 'mixed' | null>(() => {
@@ -44,13 +70,118 @@ export default function App(): JSX.Element {
   }, [files])
 
   const targets = commonKind && commonKind !== 'mixed' ? targetsFor(commonKind) : []
-  const activeTarget = targets.find((t) => t.to === target) ?? null
   const targetIsImage = target ? FORMATS[target].isImage : false
+  const sourceIsImage = !!commonKind && commonKind !== 'mixed' && FORMATS[commonKind].isImage
+
+  // 변환·미리보기가 같은 값을 쓰는 출력 크기 (한쪽만 입력 = 비율 유지)
+  const rw = Number(resizeW)
+  const rh = Number(resizeH)
+  const resize = rw > 0 || rh > 0 ? { width: rw > 0 ? rw : undefined, height: rh > 0 ? rh : undefined } : undefined
 
   useEffect(() => {
     if (targets.length === 0) setTarget(null)
     else if (!targets.some((t) => t.to === target)) setTarget(targets[0].to)
   }, [commonKind]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── undo/redo ──────────────────────────────────────────────────────────
+  // 상태 변경을 지켜보다가 잠잠해지면(디바운스) 직전 스냅샷을 이력에 쌓는다.
+  // 자르기 드래그·슬라이더처럼 연속으로 바뀌는 조작이 이력 한 칸이 되도록.
+  const snapshot: Snapshot = { files, activeId, target, scale, resizeW, resizeH, quality, tf, crop, wm }
+  const hist = useRef<{ past: Snapshot[]; future: Snapshot[] }>({ past: [], future: [] })
+  const committed = useRef<Snapshot>(snapshot) // 마지막으로 이력에 반영된 상태
+  const restoring = useRef(false) // undo/redo로 인한 상태 변경은 이력에 다시 쌓지 않는다
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const snapRef = useRef(snapshot)
+  snapRef.current = snapshot
+
+  const syncHistState = (): void =>
+    setHistState((prev) => {
+      const next = { canUndo: hist.current.past.length > 0, canRedo: hist.current.future.length > 0 }
+      return prev.canUndo === next.canUndo && prev.canRedo === next.canRedo ? prev : next
+    })
+
+  /** 대기 중(디바운스)인 변경을 즉시 이력에 반영 */
+  const flushHistory = (): void => {
+    if (commitTimer.current) {
+      clearTimeout(commitTimer.current)
+      commitTimer.current = null
+    }
+    if (!sameSnapshot(committed.current, snapRef.current)) {
+      hist.current.past.push(committed.current)
+      if (hist.current.past.length > HISTORY_MAX) hist.current.past.shift()
+      hist.current.future = []
+      committed.current = snapRef.current
+      syncHistState()
+    }
+  }
+
+  useEffect(() => {
+    if (restoring.current) {
+      restoring.current = false
+      committed.current = snapRef.current
+      return
+    }
+    if (sameSnapshot(committed.current, snapRef.current)) return
+    if (commitTimer.current) clearTimeout(commitTimer.current)
+    commitTimer.current = setTimeout(flushHistory, HISTORY_DEBOUNCE)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, activeId, target, scale, resizeW, resizeH, quality, tf, crop, wm])
+
+  function applySnapshot(s: Snapshot): void {
+    restoring.current = true
+    setFiles(s.files)
+    setActiveId(s.activeId)
+    setTarget(s.target)
+    setScale(s.scale)
+    setResizeW(s.resizeW)
+    setResizeH(s.resizeH)
+    setQuality(s.quality)
+    setTf(s.tf)
+    setCrop(s.crop)
+    setWm(s.wm)
+  }
+
+  function undo(): void {
+    flushHistory()
+    const prev = hist.current.past.pop()
+    if (!prev) return
+    hist.current.future.push(committed.current)
+    committed.current = prev
+    applySnapshot(prev)
+    syncHistState()
+  }
+
+  function redo(): void {
+    flushHistory()
+    const next = hist.current.future.pop()
+    if (!next) return
+    hist.current.past.push(committed.current)
+    committed.current = next
+    applySnapshot(next)
+    syncHistState()
+  }
+
+  const undoRef = useRef({ undo, redo })
+  undoRef.current = { undo, redo }
+
+  // Ctrl+Z / Ctrl+Y (또는 Ctrl+Shift+Z) — 입력창에 포커스가 있으면 브라우저 기본 동작에 양보
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return
+      const key = e.key.toLowerCase()
+      if (key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undoRef.current.undo()
+      } else if (key === 'y' || (key === 'z' && e.shiftKey)) {
+        e.preventDefault()
+        undoRef.current.redo()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const previewSource = useMemo<PreviewSource>(() => {
     if (commonKind && commonKind !== 'mixed' && FORMATS[commonKind].isImage && target === 'pdf' && files.length > 0) {
@@ -75,7 +206,7 @@ export default function App(): JSX.Element {
     const loaded: AppFile[] = []
     for (const file of incoming) {
       const buf = new Uint8Array(await file.arrayBuffer())
-      const kind = detectFileKind(file.name, buf.subarray(0, 140))
+      const kind = detectFileKind(file.name, buf.subarray(0, 512)) // SVG 텍스트 마커까지 커버
       const isImage = FORMATS[kind].isImage
       loaded.push({
         id: `f${idSeq++}`,
@@ -95,9 +226,8 @@ export default function App(): JSX.Element {
   }
 
   function removeFile(id: string): void {
+    // previewUrl은 revoke하지 않는다 — undo로 파일을 되살릴 때 다시 쓴다 (앱 종료 시 일괄 해제됨)
     setFiles((prev) => {
-      const target = prev.find((f) => f.id === id)
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl)
       const next = prev.filter((f) => f.id !== id)
       if (activeId === id) setActiveId(next[0]?.id ?? null)
       return next
@@ -117,22 +247,17 @@ export default function App(): JSX.Element {
 
   async function handleConvert(): Promise<void> {
     if (!target || files.length === 0) return
-    if (activeTarget?.needs === 'dicomMeta' && (!dicomMeta.patientName.trim() || !dicomMeta.patientID.trim())) {
-      setStatus({ kind: 'err', text: '환자 이름과 환자 ID는 필수입니다.' })
-      return
-    }
     setBusy(true)
     setStatus({ kind: 'info', text: '변환 중…' })
     try {
-      const w = Number(resizeW)
-      const h = Number(resizeH)
-      const resize = targetIsImage && (w > 0 || h > 0) ? { width: w > 0 ? w : undefined, height: h > 0 ? h : undefined } : undefined
       const results = await runConversion(files, {
         to: target,
         scale,
         resize,
-        dicomMeta: activeTarget?.needs === 'dicomMeta' ? dicomMeta : undefined,
-        watermark: target !== 'dicom' && wm.enabled ? wm : undefined
+        quality: quality / 100,
+        transform: sourceIsImage ? tf : undefined,
+        crop,
+        watermark: wm.enabled ? wm : undefined
       })
       if (results.length === 0) throw new Error('변환 결과가 없습니다.')
 
@@ -174,6 +299,10 @@ export default function App(): JSX.Element {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         onAddFiles={openPicker}
+        canUndo={histState.canUndo}
+        canRedo={histState.canRedo}
+        onUndo={undo}
+        onRedo={redo}
         commonKind={commonKind}
         targets={targets}
         target={target}
@@ -183,16 +312,22 @@ export default function App(): JSX.Element {
         commonKind={commonKind}
         targets={targets}
         target={target}
-        activeTarget={activeTarget}
         targetIsImage={targetIsImage}
+        sourceIsImage={sourceIsImage}
         scale={scale}
         onScale={setScale}
         resizeW={resizeW}
         resizeH={resizeH}
         onResizeW={setResizeW}
         onResizeH={setResizeH}
-        dicomMeta={dicomMeta}
-        onDicomMeta={setDicomMeta}
+        quality={quality}
+        onQuality={setQuality}
+        tf={tf}
+        onTf={setTf}
+        crop={crop}
+        cropMode={cropMode}
+        onCrop={setCrop}
+        onCropMode={setCropMode}
         wm={wm}
         onWm={setWm}
       />
@@ -209,7 +344,15 @@ export default function App(): JSX.Element {
           {files.length === 0 ? (
             <DropZone onFiles={(f) => void addFiles(f)} />
           ) : (
-            <Preview source={previewSource} watermark={target && target !== 'dicom' && wm.enabled ? wm : undefined} />
+            <Preview
+              source={previewSource}
+              watermark={target && wm.enabled ? wm : undefined}
+              transform={sourceIsImage ? tf : undefined}
+              resize={resize}
+              crop={crop}
+              cropMode={cropMode}
+              onCrop={setCrop}
+            />
           )}
         </Box>
       </Box>
@@ -235,7 +378,7 @@ export default function App(): JSX.Element {
         type="file"
         multiple
         hidden
-        accept=".pdf,.png,.jpg,.jpeg,.webp,.dcm,.dicom"
+        accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,.svg,.avif"
         onChange={(e) => {
           if (e.target.files) void addFiles(Array.from(e.target.files))
           e.target.value = ''

@@ -8,49 +8,43 @@
  * 두 곳만 손대면 된다. (확장 지점)
  */
 
-import { FileKind } from './fileTypes'
-
-export type ConvertNeeds = 'dicomMeta' | null
+import { FileKind, FORMATS } from './fileTypes'
 
 export interface ConversionTarget {
   to: FileKind
   label: string
   /** 여러 입력 파일을 결과 1개로 합치는 변환인지 (예: 이미지 여러 장 → PDF 1개) */
   merges: boolean
-  /** 실행 전 추가 입력이 필요한 변환 (예: DICOM은 환자정보 필요) */
-  needs: ConvertNeeds
 }
 
-const IMAGE_KINDS: FileKind[] = ['png', 'jpeg', 'webp']
+/**
+ * 브라우저 canvas 로 "인코딩(출력)"이 가능한 이미지 포맷.
+ * GIF/SVG/AVIF 는 읽기(디코딩)만 지원 — 입력으로 받아 아래 포맷/PDF 로 변환한다.
+ * (BMP 는 canvas 네이티브 인코딩이 없어 core/bmp.ts 자체 인코더 사용)
+ */
+export const IMAGE_OUTPUTS: FileKind[] = ['png', 'jpeg', 'webp', 'bmp']
 
 export function targetsFor(kind: FileKind): ConversionTarget[] {
-  switch (kind) {
-    case 'pdf':
-      return [
-        { to: 'png', label: 'PNG 이미지 (페이지별)', merges: false, needs: null },
-        { to: 'jpeg', label: 'JPEG 이미지 (페이지별)', merges: false, needs: null }
-      ]
-    case 'png':
-    case 'jpeg':
-    case 'webp': {
-      const targets: ConversionTarget[] = [
-        { to: 'pdf', label: 'PDF (여러 장 합치기)', merges: true, needs: null },
-        { to: 'dicom', label: 'DICOM (Secondary Capture)', merges: false, needs: 'dicomMeta' }
-      ]
-      // 다른 이미지 포맷으로의 상호 변환
-      for (const other of IMAGE_KINDS) {
-        if (other !== kind) {
-          targets.push({ to: other, label: `${other.toUpperCase()} 이미지`, merges: false, needs: null })
-        }
-      }
-      return targets
-    }
-    case 'dicom':
-      // v1: DICOM은 입력→DICOM(이미지→DICOM)만 지원. DICOM 열람/역변환은 다음 단계.
-      return []
-    default:
-      return []
+  if (kind === 'pdf') {
+    return [
+      { to: 'png', label: 'PNG 이미지 (페이지별)', merges: false },
+      { to: 'jpeg', label: 'JPEG 이미지 (페이지별)', merges: false },
+      { to: 'webp', label: 'WebP 이미지 (페이지별)', merges: false }
+    ]
   }
+  if (FORMATS[kind].isImage) {
+    const targets: ConversionTarget[] = [{ to: 'pdf', label: 'PDF (여러 장 합치기)', merges: true }]
+    for (const out of IMAGE_OUTPUTS) {
+      targets.push({
+        to: out,
+        // 같은 포맷 → 같은 포맷도 허용: 크기·품질·회전 등 옵션만 바꿔 다시 저장하는 용도
+        label: out === kind ? `${FORMATS[out].label} (크기·품질만 조절)` : `${FORMATS[out].label} 이미지`,
+        merges: false
+      })
+    }
+    return targets
+  }
+  return []
 }
 
 export function canConvert(kind: FileKind): boolean {

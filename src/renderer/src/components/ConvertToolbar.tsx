@@ -5,11 +5,13 @@ import Tooltip from '@mui/material/Tooltip'
 import Divider from '@mui/material/Divider'
 import UploadFileOutlined from '@mui/icons-material/UploadFileOutlined'
 import ViewSidebarOutlined from '@mui/icons-material/ViewSidebarOutlined'
+import UndoRounded from '@mui/icons-material/UndoRounded'
+import RedoRounded from '@mui/icons-material/RedoRounded'
 import PictureAsPdfRounded from '@mui/icons-material/PictureAsPdfRounded'
 import ImageOutlined from '@mui/icons-material/ImageOutlined'
 import PhotoOutlined from '@mui/icons-material/PhotoOutlined'
 import CollectionsOutlined from '@mui/icons-material/CollectionsOutlined'
-import LocalHospitalRounded from '@mui/icons-material/LocalHospitalRounded'
+import InsertPhotoOutlined from '@mui/icons-material/InsertPhotoOutlined'
 import { FileKind, FORMATS, ConversionTarget } from '@core/index'
 
 /** 모든 툴 버튼 규격 통일 (pdf-editor ToolBtn): 본체 76×48px 고정 — 라벨 길이와 무관하게 같은 박스 */
@@ -70,13 +72,17 @@ const TARGET_ICONS: Partial<Record<FileKind, JSX.Element>> = {
   png: <ImageOutlined />,
   jpeg: <PhotoOutlined />,
   webp: <CollectionsOutlined />,
-  dicom: <LocalHospitalRounded />
+  bmp: <InsertPhotoOutlined />
 }
 
 export interface ConvertToolbarProps {
   sidebarOpen: boolean
   onToggleSidebar: () => void
   onAddFiles: () => void
+  canUndo: boolean
+  canRedo: boolean
+  onUndo: () => void
+  onRedo: () => void
   /** 파일들의 공통 종류 (null=파일 없음, 'mixed'=종류 혼재) */
   commonKind: FileKind | 'mixed' | null
   targets: ConversionTarget[]
@@ -84,12 +90,17 @@ export interface ConvertToolbarProps {
   onTarget: (t: FileKind) => void
 }
 
-/** 메인 툴바 — 좌: 파일 관리 / 우측 영역: 변환 대상 선택 (pdf-editor Toolbar 문법) */
+/** 메인 툴바 — 좌: 파일 관리·실행취소 / 우측 영역: 변환 대상 선택 (pdf-editor Toolbar 문법) */
 export default function ConvertToolbar(p: ConvertToolbarProps): JSX.Element {
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', px: 1, py: 0.3, borderBottom: 1, borderColor: 'divider', bgcolor: '#fff', gap: 0.2, flexWrap: 'nowrap', overflowX: 'auto' }}>
       <ToolBtn label="파일 목록" icon={<ViewSidebarOutlined />} active={p.sidebarOpen} onClick={p.onToggleSidebar} />
       <ToolBtn label="파일 추가" icon={<UploadFileOutlined />} onClick={p.onAddFiles} />
+
+      <Divider orientation="vertical" flexItem sx={{ mx: 0.8, my: 1 }} />
+
+      <ToolBtn label="실행취소" tooltip="실행취소 (Ctrl+Z)" icon={<UndoRounded />} disabled={!p.canUndo} onClick={p.onUndo} />
+      <ToolBtn label="다시실행" tooltip="다시실행 (Ctrl+Y)" icon={<RedoRounded />} disabled={!p.canRedo} onClick={p.onRedo} />
 
       <Divider orientation="vertical" flexItem sx={{ mx: 0.8, my: 1 }} />
 

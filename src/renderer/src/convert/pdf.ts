@@ -4,8 +4,8 @@
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument, degrees } from 'pdf-lib'
-import { FileKind } from '@core/index'
-import { canvasToBytes, mimeFor, convertImageFormat, loadImage } from './image'
+import { FileKind, extFor } from '@core/index'
+import { canvasToBytes, mimeFor, convertImageFormat, encodeCanvas, loadImage, targetSize, ResizeOpts, CropRect, applyCrop } from './image'
 import { WatermarkOpts, drawWatermark } from '../watermark/model'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -50,39 +50,60 @@ export async function openPdf(bytes: Uint8Array): Promise<PdfHandle> {
   }
 }
 
-/**
- * PDF → 페이지별 이미지. scale 이 클수록 고해상도.
- * pageIndices 를 주면 해당 페이지만(0-based).
- */
-export async function pdfToImages(
-  bytes: Uint8Array,
-  toKind: FileKind,
-  baseName: string,
-  scale = 2,
-  pageIndices?: number[],
-  watermark?: WatermarkOpts,
+export interface PdfToImagesOpts {
+  scale?: number
+  /** 해당 페이지만(0-based). 없으면 전체 */
+  pageIndices?: number[]
+  /** 출력 픽셀 크기 강제 (없으면 scale 렌더 크기 그대로) */
+  resize?: ResizeOpts
+  /** 0~1. jpeg/webp 인코딩 품질 */
+  quality?: number
+  /** 페이지에서 잘라낼 영역 (미리보기 화면 기준 정규화) */
+  crop?: CropRect | null
+  watermark?: WatermarkOpts
   sig?: HTMLImageElement
-): Promise<NamedBytes[]> {
+}
+
+/** PDF → 페이지별 이미지. scale 이 클수록 고해상도. */
+export async function pdfToImages(bytes: Uint8Array, toKind: FileKind, baseName: string, opts: PdfToImagesOpts = {}): Promise<NamedBytes[]> {
   const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise
-  const pages = pageIndices ?? Array.from({ length: doc.numPages }, (_, i) => i)
-  const ext = toKind === 'jpeg' ? 'jpg' : toKind
+  const pages = opts.pageIndices ?? Array.from({ length: doc.numPages }, (_, i) => i)
+  const ext = extFor(toKind)
+  const fillsBg = toKind === 'jpeg' || toKind === 'bmp'
   const out: NamedBytes[] = []
   for (const idx of pages) {
     const page = await doc.getPage(idx + 1)
-    const viewport = page.getViewport({ scale })
-    const canvas = document.createElement('canvas')
+    const viewport = page.getViewport({ scale: opts.scale ?? 2 })
+    let canvas = document.createElement('canvas')
     canvas.width = Math.ceil(viewport.width)
     canvas.height = Math.ceil(viewport.height)
-    const ctx = canvas.getContext('2d')!
-    if (toKind === 'jpeg') {
+    let ctx = canvas.getContext('2d')!
+    if (fillsBg) {
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
     }
     await page.render({ canvasContext: ctx, viewport }).promise
-    if (watermark) drawWatermark(ctx, canvas.width, canvas.height, watermark, sig)
-    const pageNo = String(idx + 1).padStart(3, '0')
-    out.push({ name: `${baseName}_p${pageNo}.${ext}`, bytes: await canvasToBytes(canvas, mimeFor(toKind)) })
     page.cleanup()
+    // 출력 크기 지정 시 렌더 결과를 다시 그린다 (렌더 자체는 scale 해상도 유지 → 축소 품질 확보)
+    if (opts.resize && (opts.resize.width || opts.resize.height)) {
+      const { width, height } = targetSize(canvas.width, canvas.height, opts.resize)
+      const resized = document.createElement('canvas')
+      resized.width = width
+      resized.height = height
+      const rctx = resized.getContext('2d')!
+      if (fillsBg) {
+        rctx.fillStyle = '#ffffff'
+        rctx.fillRect(0, 0, width, height)
+      }
+      rctx.drawImage(canvas, 0, 0, width, height)
+      canvas = resized
+      ctx = rctx
+    }
+    canvas = applyCrop(canvas, opts.crop)
+    ctx = canvas.getContext('2d')!
+    if (opts.watermark) drawWatermark(ctx, canvas.width, canvas.height, opts.watermark, opts.sig)
+    const pageNo = String(idx + 1).padStart(3, '0')
+    out.push({ name: `${baseName}_p${pageNo}.${ext}`, bytes: await encodeCanvas(canvas, toKind, opts.quality) })
   }
   await doc.destroy()
   return out
