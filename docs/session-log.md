@@ -1,13 +1,71 @@
 ---
 title: 세션 진행 로그
 created: 2026-07-07
-updated: 2026-07-13
+updated: 2026-09-21
 ---
 
 # 세션 진행 로그
 
 > **이 파일이 "무슨 일이 언제 있었나"의 SSOT다** (2026-07-09 git 도입 후에도 유지 — git log는 보조, writing-guide 참고).
 > 새 세션은 이 파일부터 읽는다. 세션마다 최상단에 블록을 추가한다. 형식: 날짜 / 한 일 / 현재 상태 / 다음.
+
+---
+
+## 2026-09-21 (세션 9-b) — Compositor 2차 이식: 변환기에 쓸모 있는 것 전부 (v1.5.0)
+
+사용자: "Compositor 에서 가져온 게 별거 없다" → 전체 대조 후 "변환기 형태를 해치지 않는 선에서 쓸모 있는 건 다 적용, 테스트·검수 후
+커밋·푸시, 그 다음 포토샵형 편집기를 별도 프로젝트로(이름은 나중에), 화면은 Compositor 구조에 우리 클래식 UI 를 입히는 식".
+
+**대조 결과**: 1차(v1.4.0)는 전체의 1/3 수준. 변환기에 맞는 잔여 = 원근(Distort)·레이어 효과·필터 4종·내용 인식 채우기·
+Copy Merged·채널별 레벨/커브·자동 레벨 3모드·스포이트·6색역/색상화. 탭(여러 프로젝트)은 파일 목록과 역할이 겹쳐 제외.
+
+**한 일**
+- core 4모듈 신설(+테스트 14): `filters`(NoisePixels.c·LensPixels.c 수식 그대로, 흐림 상자 3회, 사진=가장자리 복제/누끼=여백 확장),
+  `effects`(LayerEffects CPU 경로 — 덱 팽창 외곽선·그림자·색 덮기·안쪽 그림자, 여백 자동), `perspective`(호모그래피 8원 가우스 소거, 역매핑),
+  `contentfill`(ContentFill.c 그대로 — 전파 + 무작위 패치 탐색). `adjust` 확장: 채널 톤·6색역 밴드 가중·색상화·자동 3모드·스포이트.
+- 파이프라인: 보정 → **필터** → 흰색제거 → **효과** → 캔버스(+**내용 인식**) → 자르기 → 워터마크 → 매트.
+- 원근 보정 = 파일별 소스 전처리(`warps` 이력 대상 + `warpCache`, `effFiles`, `AppFile.cacheKey` 로 AI 캐시 분리).
+- **렌더 미리보기**: 필터·효과·내용 인식이 켜지면 실제 파이프라인을 긴 변 1400px 배율로 돌려 표시(px 옵션도 같은 배율).
+- UI: 대화상자 3종(필터·효과(스티커 프리셋)·원근 보정(네 모서리+기울기+결과 미리보기)), 보정 대화상자 확장(채널·자동 방식·스포이트 표본·색 범위·색상화),
+  캔버스 여백 채우기 라디오(색/투명/내용 인식), 옵션 바 칩 3개(펴기·필터·효과), 메뉴·단축키(Ctrl+Shift+P/F/E/C), 탭 공용화(`tabs.tsx`).
+- 검증: typecheck ✅ · 단위 44/44 ✅ · build ✅ · **E2E 41/41**(신규 F 그룹 9: 스티커·흐림 여백·렌더 미리보기·클립보드·원근+undo·기울기·
+  내용 인식·채널 레벨·색역) ✅. F9 기대값은 Photoshop 과 같은 밴드 감쇠 동작에 맞춰 수정. 스크린샷 확인, 프로세스 종료 확인.
+- v1.4.0 → **v1.5.0**. 인스톨러 구움. 커밋·푸시(사용자 지시).
+
+**다음**: 포토샵형 편집기 새 프로젝트 착수.
+
+---
+
+## 2026-09-21 (세션 9) — 클래식 UI 전면 교체 + Compositor(MIT) 이식 + A~Z 리팩토링 (v1.4.0)
+
+사용자: ① `~/Compositor`(MIT, Swift/macOS 포토샵 대체)를 학습해 녹여낼 것 ② UI/UX 를 sh-messenger·remote-assist 같은 **클래식**으로.
+선택: 밀도 **완전 동일(12px)** · 구현 **토큰+MUI 재스킨** · 창 크롬 **타이틀바+메뉴 바+상태 줄 전부** · Compositor 기능 **전부**.
+작업 중 추가 지시: ③ 끝나면 A~Z 리팩토링(재사용·성능), AI 배경 제거는 가져온 게 더 좋으면 교체, Prettier printWidth 200, Playwright 실동작 검수
+④ sh-web-editor 도 클래식 — 가져올 것 적극 반영.
+
+**학습 결과**
+- Compositor ≈ 100파일·2만 줄 Swift. 레이어·브러시·선택·Metal 은 에디터 전용이라 제외, 변환기에 맞는 것만 이식(ADR-0008).
+- 배경 제거 마스크는 Apple Vision(macOS 전용) → 이식 불가. **@imgly 모델 유지**, 대신 Compositor 의 **마스크 다듬기(GuidedMatte·가장자리 이동·매트 대비)** 를 이식.
+- sh-messenger `tokens.css`/DESIGN.md, remote-assist DESIGN.md(PACSPLUS 실측), sh-web-editor DESIGN.md·skins.css(DEXT5 실측) 규약 반영.
+
+**한 일**
+- 디자인 시스템(ADR-0007, `guides/ui.md`): `styles/tokens.ts`(SSOT→:root 변수)·`base.css`·`skins.ts`(sh-web-editor 스킨 13종 생성)·`theme.ts` 클래식 재스킨.
+- 창 크롬: `frame:false` + TitleBar(28)·MenuBar(22, 6메뉴 — 호버 전환·Alt·바깥 클릭 닫기)·StatusBar(22, 진행 막대·크기·dpi·배율). main `win:*` IPC.
+- 전 컴포넌트 재작성(툴바·옵션 바(`»` 펼침)·파일 목록(memo 행·↑↓)·드롭존·미리보기(어두운 뷰어, 2%~3200% 단계 배율, Ctrl+휠, 픽셀 그리드)).
+- Compositor 이식(core 순수 로직 + 테스트 21종): 이미지 크기(단위·DPI·리샘플), 캔버스 크기(앵커·여백 추가·정사각형),
+  보정(레벨/자동·커브·노출(선형광)·색조/채도·그레인·반전·그라데이션 맵), 내보내기 미리보기(실제 인코딩·용량·매트),
+  고품질 2배씩 단계 축소, 한도 30,000px/100MP(todo P2 해소), 자르기(비율·수치·스냅·Shift·Alt), PNG/JPEG DPI 기록, AI 다듬기.
+- 렌더 파이프라인 단일화 `finishCanvas`(이미지·PDF 공용): 리사이즈→변형→보정→흰색제거→캔버스→자르기→워터마크→매트.
+- 리팩토링: `hooks/useHistory` 분리, `util/{format,accept}`, `bytesToUrl`, 죽은 코드(TopBar.tsx·미사용 토큰/헬퍼·import) 제거,
+  대화상자 5종 React.lazy(시작 청크 1,030→984KB), 보정 커널 픽셀당 배열 할당 제거, 휠 리스너 1회 부착, FileRow memo 가 실제로 먹게 콜백 안정화,
+  MUI Select 접근성(aria-label → SelectDisplayProps) 수정. **Prettier 도입**(`.prettierrc.json` printWidth 200, `npm run format`).
+- 검증: typecheck ✅ · 단위 30/30 ✅ · build(난독화) ✅ · **E2E 32/32**(기존 24 + 신규 E 그룹 8: 창 크롬·이미지 크기+DPI·캔버스·반전 undo·노출·
+  내보내기 미리보기·자르기 1:1·스킨) ✅. 스크린샷으로 화면 확인. 테스트 프로세스 종료 확인.
+- 주의 발견: `npm i -D prettier` 가 `--no-save playwright` 를 지움 → 재설치(CLAUDE.md·todo 에 기록). @imgly 는 AGPL-3.0(todo P3).
+- v1.3.2 → **v1.4.0**(큰 기능 묶음 = MINOR). 인스톨러 구움.
+
+**현재 상태**: 클래식 UI + 이식 기능 전부 동작(E2E 기준).
+**다음**: 사용자 설치 테스트 — 12px 밀도 체감, 자체 타이틀바 창 동작(끌기·스냅), 스킨.
 
 ---
 

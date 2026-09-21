@@ -67,12 +67,7 @@ function encodePng(w, h, px /* (x,y)=>[r,g,b,a] */) {
       raw.set([r, g, b, a], row + 1 + x * 4)
     }
   }
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk('IHDR', ihdr),
-    pngChunk('IDAT', zlib.deflateSync(raw)),
-    pngChunk('IEND', Buffer.alloc(0))
-  ])
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), pngChunk('IHDR', ihdr), pngChunk('IDAT', zlib.deflateSync(raw)), pngChunk('IEND', Buffer.alloc(0))])
 }
 const pngInfo = (buf) => ({ w: buf.readUInt32BE(16), h: buf.readUInt32BE(20), colorType: buf[25] })
 
@@ -84,7 +79,10 @@ async function makeFixtures() {
     encodePng(120, 80, (x, y) => (x < 10 || y < 10 || x >= 110 || y >= 70 ? [255, 255, 255, 255] : [220, 30, 30, 255]))
   )
   // 60×60 파랑
-  fs.writeFileSync(path.join(FIX, 'blue.png'), encodePng(60, 60, () => [30, 60, 220, 255]))
+  fs.writeFileSync(
+    path.join(FIX, 'blue.png'),
+    encodePng(60, 60, () => [30, 60, 220, 255])
+  )
   // AI용 200×150: 초록 배경 + 중앙 빨강 원
   fs.writeFileSync(
     path.join(FIX, 'subject.png'),
@@ -105,9 +103,18 @@ async function makeFixtures() {
   // TIFF 64×48 그라데이션 (utif2)
   const UTIF = require_('utif2')
   const rgba = new Uint8Array(64 * 48 * 4)
-  for (let y = 0; y < 48; y++)
-    for (let x = 0; x < 64; x++) rgba.set([Math.round((x / 63) * 255), 80, 160, 255], (y * 64 + x) * 4)
+  for (let y = 0; y < 48; y++) for (let x = 0; x < 64; x++) rgba.set([Math.round((x / 63) * 255), 80, 160, 255], (y * 64 + x) * 4)
   fs.writeFileSync(path.join(FIX, 'grad.tif'), Buffer.from(UTIF.encodeImage(rgba.buffer, 64, 48)))
+  // 투명 배경 + 가운데 빨간 사각형 (효과·필터 확장용) 80×80
+  fs.writeFileSync(
+    path.join(FIX, 'logo.png'),
+    encodePng(80, 80, (x, y) => (x >= 25 && x < 55 && y >= 25 && y < 55 ? [220, 30, 30, 255] : [0, 0, 0, 0]))
+  )
+  // 줄무늬 사진 (내용 인식 채우기) 60×40
+  fs.writeFileSync(
+    path.join(FIX, 'stripes.png'),
+    encodePng(60, 40, (x) => (x % 6 < 3 ? [240, 180, 20, 255] : [20, 60, 200, 255]))
+  )
   // SVG
   fs.writeFileSync(path.join(FIX, 'rect.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60"><rect width="100" height="60" fill="#cc2222"/></svg>')
 }
@@ -143,7 +150,10 @@ async function launch() {
 }
 
 const addFiles = async (page, ...names) =>
-  page.setInputFiles('input[type="file"][hidden]', names.map((n) => path.join(FIX, n)))
+  page.setInputFiles(
+    'input[type="file"][hidden]',
+    names.map((n) => path.join(FIX, n))
+  )
 
 const pickTarget = (page, label) => page.getByRole('button', { name: label, exact: true }).click()
 
@@ -165,7 +175,11 @@ async function waitSaved(page, timeout = 60000) {
   await alert.waitFor({ timeout })
   const text = (await alert.innerText()).trim()
   // 닫고 다음 테스트로
-  await page.locator('[role="alert"] button').first().click().catch(() => {})
+  await page
+    .locator('[role="alert"] button')
+    .first()
+    .click()
+    .catch(() => {})
   await alert.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {})
   assert(/저장 완료/.test(text), `저장 완료가 아님: "${text}"`)
   const files = fs.readdirSync(OUT).map((f) => ({ name: f, bytes: fs.readFileSync(path.join(OUT, f)) }))
@@ -445,16 +459,25 @@ async function groupD() {
       await pickTarget(page, 'PNG')
       await pickSelect(page, '원본 배경', 'AI 배경 제거')
       // 진행 표시가 떴다가 사라질 때까지 (모델 로드+추론, 최대 5분)
-      await page.getByText(/AI 배경 제거 중|모델/).waitFor({ timeout: 30000 }).catch(() => {})
+      await page
+        .getByText(/AI 배경 제거 중|모델/)
+        .waitFor({ timeout: 30000 })
+        .catch(() => {})
       const start = Date.now()
       while (Date.now() - start < 300000) {
         const prog = await page.locator('.MuiLinearProgress-root').count()
-        const err = await page.locator('[role="alert"]').filter({ hasText: /실패|오류/ }).count()
+        const err = await page
+          .locator('[role="alert"]')
+          .filter({ hasText: /실패|오류/ })
+          .count()
         assert(err === 0, 'AI 배경 제거 실패 알림')
         if (prog === 0) break
         await page.waitForTimeout(1000)
       }
-      const err = await page.locator('[role="alert"]').filter({ hasText: /실패|오류/ }).count()
+      const err = await page
+        .locator('[role="alert"]')
+        .filter({ hasText: /실패|오류/ })
+        .count()
       assert(err === 0, 'AI 배경 제거 실패 알림')
       const [f] = await convert(page, { timeout: 120000 })
       assert(pngInfo(f.bytes).colorType === 6, 'RGBA 아님')
@@ -464,6 +487,349 @@ async function groupD() {
     })
   } finally {
     await app.close().catch(() => {})
+  }
+}
+
+// ── 그룹 E: v1.4.0 클래식 UI + Compositor 이식 기능 ──────────────────────
+/** PNG pHYs → dpi (없으면 null) */
+function pngDpi(buf) {
+  let p = 8
+  while (p + 8 <= buf.length) {
+    const len = buf.readUInt32BE(p)
+    const type = buf.toString('latin1', p + 4, p + 8)
+    if (type === 'pHYs') return buf[p + 16] === 1 ? Math.round(buf.readUInt32BE(p + 8) * 0.0254) : null
+    if (type === 'IDAT') return null
+    p += 12 + len
+  }
+  return null
+}
+/** 앞 테스트가 실패해 남긴 대화상자·메뉴를 닫는다 (연쇄 실패 방지) */
+async function closeOverlays(page) {
+  for (let i = 0; i < 3 && (await page.locator('[role="dialog"], [role="menu"], [role="listbox"]').count()) > 0; i++) {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(150)
+  }
+}
+const dialogOk = (page) =>
+  page
+    .getByRole('dialog')
+    .getByRole('button', { name: /^(확인|이 설정 사용)$/ })
+    .click()
+
+async function groupE() {
+  console.log('\n[E] 클래식 창 크롬 + Compositor 이식 기능')
+  const { app, page } = await launch()
+  try {
+    await t('E1 창 크롬: 타이틀바 창 버튼·메뉴 6개·상태 줄', async () => {
+      for (const n of ['최소화', '최대화', '닫기']) assert((await page.getByRole('button', { name: n }).count()) === 1, `${n} 버튼 없음`)
+      assert((await page.locator('[role="menubar"] > [role="menuitem"]').count()) === 6, '메뉴 6개 아님')
+      await page.getByRole('menuitem', { name: '도움말(H)' }).click()
+      await page.getByText('파일 변환기 정보').click()
+      await page
+        .getByText(/Compositor/)
+        .first()
+        .waitFor({ timeout: 3000 })
+      await dialogOk(page)
+    })
+    await addFiles(page, 'red-white.png')
+    await page.getByText('red-white.png').first().waitFor({ timeout: 10000 })
+    await t('E2 이미지 크기: 퍼센트 50% + 해상도 300 → 60×40, pHYs 300dpi', async () => {
+      await closeOverlays(page)
+      await pickTarget(page, 'PNG')
+      await page.keyboard.press('Control+Alt+i')
+      await page.getByRole('dialog').getByText('이미지 크기').first().waitFor()
+      await page.getByRole('combobox', { name: '단위' }).click()
+      await page.getByRole('option', { name: '퍼센트' }).click()
+      await page.getByRole('textbox', { name: '폭' }).or(page.locator('input[aria-label="폭"]')).first().fill('50')
+      await page.locator('input[aria-label="해상도"]').fill('300')
+      await dialogOk(page)
+      const [f] = await convert(page)
+      const { w, h } = pngInfo(f.bytes)
+      assert(w === 60 && h === 40, `크기 ${w}×${h}`)
+      assert(pngDpi(f.bytes) === 300, `dpi ${pngDpi(f.bytes)}`)
+      await page.locator('input[placeholder="가로 자동"]').fill('')
+      await page.locator('input[placeholder="가로 자동"]').blur() // 입력칸 포커스 중엔 앱 단축키가 양보한다
+    })
+    await t('E3 캔버스 크기: 정사각형(흰 여백) → 120×120, 위쪽 여백 흰색', async () => {
+      await closeOverlays(page)
+      await page.keyboard.press('Control+Alt+c')
+      await page.locator('input[name="canvas-mode"]').nth(2).check()
+      await dialogOk(page)
+      await pickTarget(page, 'JPEG')
+      const [f] = await convert(page)
+      const d = await decodeInPage(page, f.bytes)
+      assert(d.w === 120 && d.h === 120, `크기 ${d.w}×${d.h}`)
+      assert(d.tl[0] > 240 && d.tl[1] > 240, `여백이 흰색 아님 ${d.tl}`)
+      await page.keyboard.press('Control+Alt+c')
+      await page.getByRole('dialog').getByRole('button', { name: '해제' }).click()
+    })
+    await t('E4 보정 반전(Ctrl+I) → 중앙 청록, Ctrl+Z 로 원복', async () => {
+      await closeOverlays(page)
+      await pickTarget(page, 'PNG')
+      await page.mouse.click(700, 450)
+      await page.keyboard.press('Control+i')
+      await page.waitForTimeout(500)
+      let [f] = await convert(page)
+      let d = await decodeInPage(page, f.bytes)
+      assert(d.center[0] < 60 && d.center[1] > 200, `반전 안 됨 ${d.center}`)
+      await page.keyboard.press('Control+z')
+      await page.waitForTimeout(300)
+      ;[f] = await convert(page)
+      d = await decodeInPage(page, f.bytes)
+      assert(d.center[0] > 200, `원복 안 됨 ${d.center}`)
+    })
+    await t('E5 보정 대화상자: 노출 +1EV → 중앙 밝아짐', async () => {
+      await closeOverlays(page)
+      await page.keyboard.press('Control+m')
+      await page.getByRole('tab', { name: '노출' }).click()
+      await page.locator('input[aria-label="노출 값"]').fill('1')
+      await dialogOk(page)
+      await page.waitForTimeout(500)
+      const [f] = await convert(page)
+      const d = await decodeInPage(page, f.bytes)
+      // 원본 (220,30,30): 선형광 ×2 → sRGB G 30→약 44, R 은 포화 255 (Compositor Exposure 와 같은 수식)
+      assert(d.center[0] === 255 && d.center[1] >= 40 && d.center[1] <= 48, `노출 결과 이상 ${d.center}`)
+      await page.getByRole('menuitem', { name: '편집(E)' }).click()
+      await page.getByText('모든 옵션 초기화').click()
+    })
+    await t('E6 내보내기 미리보기: 실제 용량 표시 + 품질 10% 적용 → 파일 작아짐', async () => {
+      await closeOverlays(page)
+      await pickTarget(page, 'JPEG')
+      const [big] = await convert(page)
+      await page.keyboard.press('Control+Alt+Shift+s')
+      await page.getByText(/KB · \d+×\d+px/).waitFor({ timeout: 10000 })
+      const slider = page.getByRole('dialog').getByRole('slider', { name: '품질' })
+      await slider.focus()
+      await page.keyboard.press('Home')
+      await page.getByText('10%', { exact: true }).waitFor()
+      await page.getByText(/KB · \d+×\d+px/).waitFor({ timeout: 10000 })
+      await page.waitForTimeout(400)
+      await dialogOk(page)
+      const [small] = await convert(page)
+      assert(small.bytes.length < big.bytes.length, `작아지지 않음 ${small.bytes.length} ≥ ${big.bytes.length}`)
+    })
+    await t('E7 자르기 비율 1:1 → 정사각 결과', async () => {
+      await closeOverlays(page)
+      await pickTarget(page, 'PNG')
+      await page.keyboard.press('c')
+      await page.getByRole('combobox', { name: '자르기 비율' }).click()
+      await page.getByRole('option', { name: '1:1 정사각' }).click()
+      const imgs = page.locator('img[alt="미리보기"]')
+      const box = await imgs.first().boundingBox()
+      await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.2)
+      await page.mouse.down()
+      await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.6, { steps: 8 })
+      await page.mouse.up()
+      const [f] = await convert(page)
+      const { w, h } = pngInfo(f.bytes)
+      assert(Math.abs(w - h) <= 1 && w > 10, `정사각 아님 ${w}×${h}`)
+      await page.locator('svg[data-testid="CloseRoundedIcon"]').locator('xpath=ancestor::button[1]').first().click()
+    })
+    await t('E8 스킨 변경 → 크롬 변수 교체·기억', async () => {
+      await closeOverlays(page)
+      await page.getByRole('menuitem', { name: '보기(V)' }).click()
+      await page.getByText('스킨: 초록').click()
+      const v = await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue('--k-frame').trim(), localStorage.getItem('fc.skin')])
+      assert(v[1] === 'green' && v[0] && v[0] !== '#a1abb9', `스킨 안 바뀜 ${v}`)
+      await page.getByRole('menuitem', { name: '보기(V)' }).click()
+      await page.getByText('스킨: 파랑').click()
+    })
+  } finally {
+    await app.close().catch(() => {})
+  }
+}
+
+// ── 그룹 F: v1.5.0 Compositor 2차 이식 (필터·효과·원근·내용 인식·채널·색역·클립보드) ──
+async function groupF() {
+  console.log('\n[F] Compositor 2차 이식')
+  const { app, page } = await launch()
+  try {
+    await addFiles(page, 'logo.png')
+    await page.getByText('logo.png').first().waitFor({ timeout: 10000 })
+    await pickTarget(page, 'PNG')
+    await t('F1 효과: 스티커 프리셋 → 외곽선 여백만큼 커지고 둘레가 흰색', async () => {
+      await closeOverlays(page)
+      await page.keyboard.press('Control+Shift+e')
+      await page.getByRole('button', { name: '스티커 프리셋' }).click()
+      await dialogOk(page)
+      const [f] = await convert(page)
+      const { w, h } = pngInfo(f.bytes)
+      assert(w > 80 && h > 80, `커지지 않음 ${w}×${h}`)
+      const px = await page.evaluate(
+        async ([b64, W]) => {
+          const bin = atob(b64)
+          const arr = new Uint8Array(bin.length)
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+          const bmp = await createImageBitmap(new Blob([arr]))
+          const c = document.createElement('canvas')
+          c.width = bmp.width
+          c.height = bmp.height
+          const x = c.getContext('2d')
+          x.drawImage(bmp, 0, 0)
+          const m = (bmp.width - 80) / 2 // 효과 여백 (사방 동일)
+          return {
+            ring: Array.from(x.getImageData(m + 20, m + 40, 1, 1).data),
+            center: Array.from(x.getImageData(bmp.width / 2, bmp.height / 2, 1, 1).data),
+            corner: Array.from(x.getImageData(0, 0, 1, 1).data)
+          }
+        },
+        [f.bytes.toString('base64'), w]
+      )
+      assert(px.ring[0] > 240 && px.ring[3] > 240, `둘레가 흰 외곽선 아님 ${px.ring}`)
+      assert(px.center[0] > 200 && px.center[1] < 60, `가운데 빨강 아님 ${px.center}`)
+      assert(px.corner[3] < 60, `모서리가 투명해야 ${px.corner}`)
+      await page.keyboard.press('Control+Shift+e')
+      await page.getByRole('button', { name: '모두 끄기' }).click()
+      await dialogOk(page)
+    })
+    await t('F2 필터: 가우시안 블러 → 투명 누끼는 여백만큼 넓어지고 경계가 부드러워짐', async () => {
+      await closeOverlays(page)
+      await page.keyboard.press('Control+Shift+f')
+      await page.locator('input[aria-label="가우시안 값"]').fill('3')
+      await dialogOk(page)
+      const [f] = await convert(page)
+      const { w } = pngInfo(f.bytes)
+      assert(w === 80 + 2 * 11, `여백 확장 안 됨 w=${w}`) // filterMargin(3) = ceil(3*3+2)=11
+      await page.keyboard.press('Control+Shift+f')
+      await page.getByRole('button', { name: '모두 끄기' }).click()
+      await dialogOk(page)
+    })
+    await t('F3 렌더 미리보기: 필터가 켜지면 미리보기가 실제 결과로 바뀐다', async () => {
+      await closeOverlays(page)
+      await page.keyboard.press('Control+Shift+f')
+      await page.locator('input[aria-label="가우시안 값"]').fill('4')
+      await dialogOk(page)
+      await page.waitForTimeout(1500)
+      const src = await page.locator('img[alt="미리보기"]').getAttribute('src')
+      const sb = await page
+        .getByText(/→ \d+×\d+px/)
+        .first()
+        .innerText()
+      assert(src && src.startsWith('blob:'), '미리보기 없음')
+      assert(/→ 108×108px/.test(sb), `상태 줄 출력 크기가 결과와 다름: ${sb}`) // 80 + 2*14
+      await page.keyboard.press('Control+Shift+f')
+      await page.getByRole('button', { name: '모두 끄기' }).click()
+      await dialogOk(page)
+    })
+    await t('F4 클립보드로 복사(Ctrl+Shift+C) → 시스템 클립보드에 같은 크기 이미지', async () => {
+      await closeOverlays(page)
+      await page.mouse.click(700, 450)
+      await page.keyboard.press('Control+Shift+c')
+      await page.getByText(/클립보드에 복사했습니다/).waitFor({ timeout: 10000 })
+      const size = await app.evaluate(({ clipboard }) => clipboard.readImage().getSize())
+      assert(size.width === 80 && size.height === 80, `클립보드 크기 ${JSON.stringify(size)}`)
+      await page
+        .locator('[role="alert"] button')
+        .first()
+        .click()
+        .catch(() => {})
+    })
+    await t('F5 원근 보정: 오른쪽 위 모서리를 안으로 → 결과 크기가 바뀌고 되돌리면 원래대로', async () => {
+      await closeOverlays(page)
+      await page.keyboard.press('Control+Shift+p')
+      const h = page.getByRole('slider', { name: '오른쪽 위 모서리' })
+      const b = await h.boundingBox()
+      await page.mouse.move(b.x + 6, b.y + 6)
+      await page.mouse.down()
+      await page.mouse.move(b.x - 120, b.y + 6, { steps: 6 })
+      await page.mouse.up()
+      await page.getByText(/결과: \d/).waitFor()
+      await dialogOk(page)
+      await page.getByText('logo.png').first().waitFor()
+      await page.waitForTimeout(600)
+      const [f] = await convert(page)
+      const { w } = pngInfo(f.bytes)
+      assert(w < 80, `펴진 결과 폭이 줄지 않음 ${w}`)
+      await page.keyboard.press('Control+z')
+      await page.waitForTimeout(500)
+      const [g] = await convert(page)
+      assert(pngInfo(g.bytes).w === 80, 'undo 로 원복 안 됨')
+    })
+    await t('F6 기울기 슬라이더 → 결과가 회전한 사각형 크기', async () => {
+      await closeOverlays(page)
+      await page.keyboard.press('Control+Shift+p')
+      const sl = page.getByRole('dialog').getByRole('slider', { name: '기울기' })
+      await sl.focus()
+      for (let i = 0; i < 10; i++) await page.keyboard.press('PageUp')
+      await dialogOk(page)
+      await page.waitForTimeout(600)
+      const [f] = await convert(page)
+      assert(pngInfo(f.bytes).w === 80, '크기 유지(마주 보는 변 평균) — 80')
+      await page.keyboard.press('Control+z')
+      await page.waitForTimeout(400)
+    })
+  } finally {
+    await app.close().catch(() => {})
+  }
+
+  const b = await launch()
+  try {
+    await addFiles(b.page, 'stripes.png')
+    await b.page.getByText('stripes.png').first().waitFor({ timeout: 10000 })
+    await pickTarget(b.page, 'PNG')
+    await t('F7 캔버스 크기 + 내용 인식 채우기 → 늘어난 여백이 투명·단색이 아니라 무늬', async () => {
+      const page = b.page
+      await closeOverlays(page)
+      await page.mouse.click(700, 450)
+      await page.keyboard.press('Control+Alt+c')
+      await page.locator('input[name="canvas-mode"]').nth(1).check()
+      await page.locator('input[aria-label="캔버스 높이"]').fill('20')
+      await page.locator('input[name="canvas-fill"]').nth(2).check()
+      await dialogOk(page)
+      const [f] = await convert(page, { timeout: 60000 })
+      const d = await decodeInPage(page, f.bytes)
+      assert(d.w === 60 && d.h === 60, `크기 ${d.w}×${d.h}`)
+      assert(d.tl[3] === 255, `여백이 투명 ${d.tl}`)
+      assert((d.tl[0] > 200 && d.tl[2] < 80) || (d.tl[2] > 150 && d.tl[0] < 80), `무늬 색이 아님 ${d.tl}`)
+    })
+    await t('F8 채널 레벨: 빨강 채널만 흰 점 → R 만 올라감', async () => {
+      const page = b.page
+      await closeOverlays(page)
+      await page.keyboard.press('Control+Alt+c')
+      await page.getByRole('dialog').getByRole('button', { name: '해제' }).click()
+      await page.keyboard.press('Control+m')
+      await page.getByRole('combobox', { name: '채널' }).click()
+      await page.getByRole('option', { name: '빨강' }).click()
+      await page.locator('input[aria-label="흰색 값"]').first().fill('128')
+      await dialogOk(page)
+      await page.waitForTimeout(400)
+      const [f] = await convert(page)
+      const d = await decodeInPage(page, f.bytes)
+      // (1,1) = 노랑 줄 (240,180,20) → R 은 포화 255, G·B 그대로
+      assert(d.tl[0] === 255 && Math.abs(d.tl[1] - 180) <= 1 && Math.abs(d.tl[2] - 20) <= 1, `채널 레벨 결과 ${d.tl}`)
+      await page.getByRole('menuitem', { name: '편집(E)' }).click()
+      await page.getByText('모든 옵션 초기화').click()
+    })
+    await t('F9 색역 색조/채도: 노랑 계열 채도 −100 → 노랑 줄만 회색, 파랑 줄 그대로', async () => {
+      const page = b.page
+      await closeOverlays(page)
+      await page.keyboard.press('Control+m')
+      await page.getByRole('tab', { name: '색조/채도' }).click()
+      await page.getByRole('combobox', { name: '색 범위' }).click()
+      await page.getByRole('option', { name: '노랑 계열' }).click()
+      await page.locator('input[aria-label="채도 값"]').fill('-100')
+      await dialogOk(page)
+      await page.waitForTimeout(400)
+      const [f] = await convert(page)
+      const px = await page.evaluate(async (b64) => {
+        const bin = atob(b64)
+        const arr = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+        const bmp = await createImageBitmap(new Blob([arr]))
+        const c = document.createElement('canvas')
+        c.width = bmp.width
+        c.height = bmp.height
+        const x = c.getContext('2d')
+        x.drawImage(bmp, 0, 0)
+        return [Array.from(x.getImageData(1, 5, 1, 1).data), Array.from(x.getImageData(4, 5, 1, 1).data)]
+      }, f.bytes.toString('base64'))
+      const [yellow, blue] = px
+      // (240,180,20) 은 색조 43.6° — 노랑 밴드(45°~75°) 의 감쇠 어깨(15°~45°)라 가중 0.95 → 채도 5% 만 남는다 (Photoshop 과 같은 동작)
+      assert(Math.max(...yellow.slice(0, 3)) - Math.min(...yellow.slice(0, 3)) <= 12, `노랑이 거의 회색이 안 됨 ${yellow}`)
+      assert(blue[2] > 180 && blue[0] < 40, `파랑이 바뀜 ${blue}`)
+    })
+  } finally {
+    await b.app.close().catch(() => {})
   }
 }
 
@@ -479,6 +845,8 @@ const main = async () => {
   await groupB()
   await groupC()
   await groupD()
+  await groupE()
+  await groupF()
 
   const pass = results.filter((r) => r.ok).length
   console.log(`\n결과: ${pass}/${results.length} PASS`)

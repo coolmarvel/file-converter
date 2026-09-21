@@ -7,11 +7,7 @@ import { AppFile } from '../types'
 import { NamedBytes, mergePdfs, splitPdf, rotatePdf, deletePages, reorderPdf } from './pdf'
 
 export type PdfToolRequest =
-  | { op: 'merge' }
-  | { op: 'split'; pages: string }
-  | { op: 'rotate'; pages: string; angle: 90 | 180 | 270 }
-  | { op: 'delete'; pages: string }
-  | { op: 'reorder'; pages: string }
+  { op: 'merge' } | { op: 'split'; pages: string } | { op: 'rotate'; pages: string; angle: 90 | 180 | 270 } | { op: 'delete'; pages: string } | { op: 'reorder'; pages: string }
 
 function stripExt(name: string): string {
   const i = name.lastIndexOf('.')
@@ -21,7 +17,10 @@ function stripExt(name: string): string {
 /** "1,3-5" → 0-based 인덱스 배열 (검증 포함) */
 export function parsePages(spec: string, pageCount: number): number[] {
   const out = new Set<number>()
-  for (const part of spec.split(',').map((s) => s.trim()).filter(Boolean)) {
+  for (const part of spec
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)) {
     const m = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/)
     if (!m) throw new Error(`페이지 지정이 잘못됐습니다: "${part}" (예: 1,3-5)`)
     const a = Number(m[1])
@@ -35,7 +34,10 @@ export function parsePages(spec: string, pageCount: number): number[] {
 
 /** "1,3-5 / 6-10" 같은 분할 스펙 → 범위 목록 (구분자 , 또는 /) */
 export function parseRanges(spec: string, pageCount: number): [number, number][] {
-  const parts = spec.split(/[,/]/).map((s) => s.trim()).filter(Boolean)
+  const parts = spec
+    .split(/[,/]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
   if (!parts.length) throw new Error('분할 범위를 지정해 주세요. (예: 1-3,4-10)')
   return parts.map((part) => {
     const m = part.match(/^(\d+)(?:\s*-\s*(\d+))?$/)

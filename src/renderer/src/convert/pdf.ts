@@ -4,8 +4,8 @@
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { PDFDocument, degrees } from 'pdf-lib'
-import { FileKind, extFor } from '@core/index'
-import { canvasToBytes, mimeFor, convertImageFormat, encodeCanvas, loadImage, targetSize, ResizeOpts, CropRect, applyCrop, removeWhiteBg, supportsAlpha } from './image'
+import { FileKind, extFor, fitWithinLimits } from '@core/index'
+import { canvasToBytes, mimeFor, convertImageFormat, encodeCanvas, loadImage, targetSize, supportsAlpha, scaledCanvas, assertCanvasSize, finishCanvas, ImageConvertOpts } from './image'
 import { WatermarkOpts, drawWatermark } from '../watermark/model'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -50,76 +50,56 @@ export async function openPdf(bytes: Uint8Array): Promise<PdfHandle> {
   }
 }
 
-export interface PdfToImagesOpts {
+export interface PdfToImagesOpts extends ImageConvertOpts {
   scale?: number
   /** 해당 페이지만(0-based). 없으면 전체 */
   pageIndices?: number[]
-  /** 출력 픽셀 크기 강제 (없으면 scale 렌더 크기 그대로) */
-  resize?: ResizeOpts
-  /** 0~1. jpeg/webp 인코딩 품질 */
-  quality?: number
-  /** 페이지에서 잘라낼 영역 (미리보기 화면 기준 정규화) */
-  crop?: CropRect | null
-  /** 흰색 배경 → 투명 (png/webp 대상일 때만 의미) */
-  whiteTolerance?: number | null
-  watermark?: WatermarkOpts
-  sig?: HTMLImageElement
 }
 
-/** PDF → 페이지별 이미지. scale 이 클수록 고해상도. */
+/**
+ * PDF → 페이지별 이미지. scale 이 클수록 고해상도.
+ * 렌더 뒤 후처리(보정·흰색제거·캔버스 크기·자르기·워터마크·매트)는 이미지 경로와 같은 finishCanvas.
+ */
 export async function pdfToImages(bytes: Uint8Array, toKind: FileKind, baseName: string, opts: PdfToImagesOpts = {}): Promise<NamedBytes[]> {
   const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise
   const pages = opts.pageIndices ?? Array.from({ length: doc.numPages }, (_, i) => i)
   const ext = extFor(toKind)
-  const fillsBg = toKind === 'jpeg' || toKind === 'bmp'
+  const opaque = !supportsAlpha(toKind)
   const out: NamedBytes[] = []
   for (const idx of pages) {
     const page = await doc.getPage(idx + 1)
-    const viewport = page.getViewport({ scale: opts.scale ?? 2 })
+    let viewport = page.getViewport({ scale: opts.scale ?? 2 })
+    // 스캔 PDF 의 거대한 페이지 × 3배는 한도를 넘을 수 있다 → 비율 유지해 한도 안으로 자동 축소
+    const fit = fitWithinLimits(viewport.width, viewport.height)
+    if (fit.width < Math.ceil(viewport.width)) viewport = page.getViewport({ scale: (opts.scale ?? 2) * (fit.width / viewport.width) })
     let canvas = document.createElement('canvas')
     canvas.width = Math.ceil(viewport.width)
     canvas.height = Math.ceil(viewport.height)
-    let ctx = canvas.getContext('2d')!
-    if (fillsBg) {
-      ctx.fillStyle = '#ffffff'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
-    }
-    await page.render({ canvasContext: ctx, viewport }).promise
+    await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise
     page.cleanup()
-    // 출력 크기 지정 시 렌더 결과를 다시 그린다 (렌더 자체는 scale 해상도 유지 → 축소 품질 확보)
+    // 출력 크기 지정 시 렌더 결과를 고품질 단계 축소로 다시 그린다 (렌더 자체는 scale 해상도 유지)
     if (opts.resize && (opts.resize.width || opts.resize.height)) {
       const { width, height } = targetSize(canvas.width, canvas.height, opts.resize)
-      const resized = document.createElement('canvas')
-      resized.width = width
-      resized.height = height
-      const rctx = resized.getContext('2d')!
-      if (fillsBg) {
-        rctx.fillStyle = '#ffffff'
-        rctx.fillRect(0, 0, width, height)
-      }
-      rctx.drawImage(canvas, 0, 0, width, height)
-      canvas = resized
-      ctx = rctx
+      assertCanvasSize(width, height)
+      canvas = scaledCanvas(canvas, canvas.width, canvas.height, width, height)
     }
-    canvas = applyCrop(canvas, opts.crop)
-    ctx = canvas.getContext('2d')!
-    if (supportsAlpha(toKind) && opts.whiteTolerance != null) removeWhiteBg(canvas, opts.whiteTolerance)
-    if (opts.watermark) drawWatermark(ctx, canvas.width, canvas.height, opts.watermark, opts.sig)
+    canvas = finishCanvas(canvas, opts, opaque)
     const pageNo = String(idx + 1).padStart(3, '0')
-    out.push({ name: `${baseName}_p${pageNo}.${ext}`, bytes: await encodeCanvas(canvas, toKind, opts.quality) })
+    out.push({ name: `${baseName}_p${pageNo}.${ext}`, bytes: await encodeCanvas(canvas, toKind, opts.quality, opts.dpi) })
   }
   await doc.destroy()
   return out
 }
 
-/** 이미지 여러 장 → PDF 1개 (한 장당 한 페이지, 이미지 크기에 맞춤). watermark 주면 각 페이지에 합성. */
-export async function imagesToPdf(
-  images: { bytes: Uint8Array; kind: FileKind }[],
-  watermark?: WatermarkOpts,
-  sig?: HTMLImageElement
-): Promise<Uint8Array> {
+/**
+ * 이미지 여러 장 → PDF 1개 (한 장당 한 페이지, 이미지 크기에 맞춤). watermark 주면 각 페이지에 합성.
+ * dpi 를 주면 페이지 크기를 인쇄 해상도로 환산한다 (300dpi 의 3000px = 10인치 = 720pt).
+ * 없으면 이전과 같이 1px = 1pt(72dpi).
+ */
+export async function imagesToPdf(images: { bytes: Uint8Array; kind: FileKind }[], watermark?: WatermarkOpts, sig?: HTMLImageElement, dpi?: number | null): Promise<Uint8Array> {
   const pdf = await PDFDocument.create()
   const wm = watermark?.enabled ? watermark : undefined
+  const k = dpi && dpi > 0 ? 72 / dpi : 1 // 픽셀 → 포인트
   for (const img of images) {
     if (wm) {
       // 워터마크가 있으면 캔버스에 원본+워터마크를 그려 PNG로 임베드
@@ -132,8 +112,8 @@ export async function imagesToPdf(
       drawWatermark(ctx, canvas.width, canvas.height, wm, sig)
       const png = await canvasToBytes(canvas, 'image/png')
       const embedded = await pdf.embedPng(png)
-      const page = pdf.addPage([embedded.width, embedded.height])
-      page.drawImage(embedded, { x: 0, y: 0, width: embedded.width, height: embedded.height })
+      const page = pdf.addPage([embedded.width * k, embedded.height * k])
+      page.drawImage(embedded, { x: 0, y: 0, width: embedded.width * k, height: embedded.height * k })
       continue
     }
     // pdf-lib는 png/jpg만 임베드 가능 → webp 등은 png로 먼저 변환
@@ -144,8 +124,8 @@ export async function imagesToPdf(
       isPng = true
     }
     const embedded = isPng ? await pdf.embedPng(embedBytes) : await pdf.embedJpg(embedBytes)
-    const page = pdf.addPage([embedded.width, embedded.height])
-    page.drawImage(embedded, { x: 0, y: 0, width: embedded.width, height: embedded.height })
+    const page = pdf.addPage([embedded.width * k, embedded.height * k])
+    page.drawImage(embedded, { x: 0, y: 0, width: embedded.width * k, height: embedded.height * k })
   }
   return pdf.save()
 }

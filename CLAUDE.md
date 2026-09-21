@@ -38,7 +38,7 @@
 - **PATCH**(1.0.**X**) — **기본값**. 수정/기능 하나 반영할 때마다 +1 (1.0.0 → 1.0.1 → 1.0.2 …).
 - **MINOR**(1.**X**.0) — 큰 기능 묶음을 한 번에 낼 때(판단). PATCH는 0으로.
 - **MAJOR**(**X**.0.0) — 대규모 재설계/호환 깨짐. 사용자와 상의.
-- 현재: **1.3.2** (2026-07-13 설치본 난독화 내장 + 전체 기능 E2E 24종 통과. AI 모델 354MB 번들로 인스톨러 큼 — 설치 확인 대기).
+- 현재: **1.5.0** (2026-09-21 Compositor 2차 이식 — 원근 보정·효과·필터·내용 인식·채널 보정·클립보드. 단위 44·E2E 41 통과 — 설치 확인 대기).
 - ~~pdfguru 편집기 전체 구현 로드맵~~ → **2026-07-08 새 프로젝트 `/home/jace/pdf-editor` 로 분리·승계**
   (session-log 세션 5 참조). 이 프로젝트는 변환기로 유지, PDF 편집 요청은 pdf-editor에서 작업.
 - 매번 `package.json` version 올리고 → 인스톨러 파일명·changelog·session-log에 반영.
@@ -80,7 +80,10 @@ PDF·이미지를 **오프라인에서** 상호 변환하는 Electron 데스크�
 ```bash
 npm run dev          # 개발 모드 (HMR)
 npm run typecheck    # 타입 검사 (node + web)
-npm test             # core 순수 로직 테스트
+npm test             # core 순수 로직 테스트 (test/*.test.ts)
+npm run format       # Prettier (printWidth 200, 세미콜론 없음, 작은따옴표) — format:check 로 검사
+# 실제 앱 E2E: npm run build && npm i --no-save playwright && node test/e2e/full-regression.mjs  (41종, 그룹 A~F)
+#   ⚠️ npm i -D 등 다른 설치를 하면 --no-save playwright 가 지워진다 → 다시 설치
 
 # 인스톨러 굽기 (WSL에서 윈도우 NSIS 설치기 = Wine 필요)
 npm run dist:win     # → release/파일변환기-Setup-<version>.exe
@@ -89,10 +92,17 @@ npm run dist:win     # → release/파일변환기-Setup-<version>.exe
 
 ## 코드 지도 (수정 시 어디를 보나)
 
-- 화면 상태·흐름: `src/renderer/src/App.tsx` (상태·핸들러 SSOT + 셸 레이아웃)
-- **디자인 시스템**: `src/renderer/src/theme.ts` — pdf-editor에서 이식한 MUI 테마(v1.1.0~). 브랜드 색만 파랑(#3b74f2), 나머지 토큰은 두 앱 공통. CSS 파일 없음(테마+sx 일원화)
-- UI 조각: `src/renderer/src/components/` — `TopBar`(타이틀+변환 버튼), `ConvertToolbar`(변환 대상 선택 툴바), `OptionsBar`(컨텍스트 툴바: PDF도구/해상도/크기/품질/회전·반전·흑백/배경(흰색·AI)/자르기/워터마크 옵션), `bar.tsx`(컨텍스트 바 공용 부품), `FileSidebar`(좌측 파일 목록·순서변경), DropZone, Preview, WatermarkOverlay
-- 실제 변환 구현(canvas/pdf.js): `src/renderer/src/convert/` (image, pdf, decode=HEIC/TIFF, bgremove=AI 배경 제거, pdftools, index=디스패처)
+- 화면 상태·흐름: `src/renderer/src/App.tsx` (상태·핸들러·**메뉴 정의·단축키** SSOT + 셸 레이아웃). undo/redo = `hooks/useHistory.ts`
+- **디자인 시스템(v1.4.0 클래식, ADR-0007 · `docs/guides/ui.md`)**: 토큰 SSOT `styles/tokens.ts`(→ :root CSS 변수) + `styles/base.css` +
+  `styles/skins.ts`(sh-web-editor 스킨 13종, 크롬 색 = `chrome.*` CSS 변수) + `theme.ts`(MUI 재스킨). 컴포넌트에 색·크기 리터럴 금지
+- 창 크롬: `components/chrome/{TitleBar,MenuBar,StatusBar}.tsx` (frame:false — main `win:*` IPC, preload `api.win`)
+- UI 조각: `components/` — `ConvertToolbar`(대상 버튼+변환 후 저장), `OptionsBar`(옵션 바, 넘치면 `»`), `bar.tsx`(공용 부품),
+  `FileSidebar`, DropZone, `Preview`(어두운 뷰어·배율·픽셀 그리드·자르기·픽셀 패스), WatermarkOverlay,
+  `dialogs/`(ImageSize·CanvasSize·Export·Adjust·Filters·Effects·Perspective·About — React.lazy, 공용 틀 `parts.tsx`·`tabs.tsx`)
+- 실제 변환 구현(canvas/pdf.js): `src/renderer/src/convert/` (image=파이프라인·고품질 축소·finishCanvas, pdf, decode=HEIC/TIFF, bgremove=AI 배경 제거, matte=다듬기 어댑터, pdftools, index=디스패처)
+- **Compositor(MIT) 이식 순수 로직**(ADR-0008): `src/core/{imagesize,canvassize,adjust,matte,dpi,limits,filters,effects,perspective,contentfill}.ts` — 테스트 `test/compositor*.test.ts`.
+  원근 보정은 파일별 소스 전처리(`App.effFiles`·`AppFile.cacheKey`), 필터·효과는 렌더 미리보기(`App` rendered + Preview `natOverride`)
+  렌더 순서 SSOT = `docs/guides/conversion.md` §렌더 파이프라인
 - **AI 배경 제거 주의**: `@imgly/background-removal`은 **1.4.5 고정** — 모델 npm 패키지(background-removal-data)가 1.4.5까지만 존재(신버전은 자사 CDN 전용 = 오프라인 불가). 모델은 extraResources(bgrm-data)로 번들, main의 bgrm:// 프로토콜로 서빙, 렌더러 CSP에 bgrm:/unsafe-eval 허용 필요
 - ~~PDF 주석 편집~~ → v1.0.5에서 제거, `~/pdf-editor` 프로젝트로 이관
 - 워터마크 모델·렌더: `src/renderer/src/watermark/model.ts` (guides/watermark.md). 변환 계층 3경로에 주입.

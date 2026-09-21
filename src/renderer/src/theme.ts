@@ -1,180 +1,262 @@
 import { createTheme } from '@mui/material/styles'
+import { ui, color, chrome, font, size, shadow, surface, space } from './styles/tokens'
 
 /**
- * 자매 프로젝트 pdf-editor 의 디자인 시스템(TailAdmin → MUI 스킨)을 이식한 테마.
- * 브랜드 색만 다르다 — pdf-editor 는 pdfguru 레드, 여기는 파일 변환기 고유의 파랑(#3b74f2,
- * 구 styles.css 의 --accent · 앱 아이콘과 동일 계열). 나머지 토큰(그레이·섀도·라운드·컴포넌트
- * 오버라이드)은 두 앱이 같은 규칙을 공유한다.
+ * 클래식 MUI 스킨 (v1.4.0~).
+ *
+ * 2026-09-21 사용자 지시: sh-messenger·remote-assist 같은 **클래식** UI/UX.
+ * 토큰 SSOT 는 `styles/tokens.ts` 이고 이 파일은 MUI 부품을 그 토큰으로 다시 칠하기만 한다.
+ * 규칙: 반경 0 · 1px 테두리 · 12px 돋움 · 24px 컨트롤 · 베벨 버튼 면 ·
+ * 그림자는 팝오버/대화상자만 · 포커스는 안쪽 1px 점선.
+ *
+ * (이전 TailAdmin 계열 둥근 테마는 v1.3.2 까지 — ADR-0007 에 교체 사유)
  */
+export { ui }
 
-// ── 디자인 토큰 ──
-export const ui = {
-  gray: {
-    25: '#fcfcfd',
-    50: '#f9fafb',
-    100: '#f2f4f7',
-    200: '#e4e7ec',
-    300: '#d0d5dd',
-    400: '#98a2b3',
-    500: '#667085',
-    600: '#475467',
-    700: '#344054',
-    800: '#1d2939',
-    900: '#101828'
-  },
-  // 브랜드(파랑) 스케일 — 기존 --accent(#3b74f2) 기준
-  brand: {
-    50: '#eef3fe',
-    100: '#dbe6fc',
-    500: '#3b74f2',
-    600: '#2c5cd9',
-    700: '#2149b3'
-  },
-  shadow: {
-    xs: '0px 1px 2px 0px rgba(16, 24, 40, 0.05)',
-    sm: '0px 1px 3px 0px rgba(16, 24, 40, 0.1), 0px 1px 2px 0px rgba(16, 24, 40, 0.06)',
-    md: '0px 4px 8px -2px rgba(16, 24, 40, 0.1), 0px 2px 4px -2px rgba(16, 24, 40, 0.06)',
-    lg: '0px 12px 16px -4px rgba(16, 24, 40, 0.08), 0px 4px 6px -2px rgba(16, 24, 40, 0.03)',
-    focusRing: '0px 0px 0px 4px rgba(59, 116, 242, 0.12)'
-  }
-} as const
+const focusRing = { outline: `1px dotted ${color.text}`, outlineOffset: '-3px' } as const
 
 export const theme = createTheme({
   palette: {
     mode: 'light',
-    primary: { main: ui.brand[500], dark: ui.brand[600], light: ui.brand[50] },
-    secondary: { main: '#5b5bd6' },
-    background: { default: ui.gray[50], paper: '#ffffff' },
-    text: { primary: ui.gray[900], secondary: ui.gray[500] },
-    divider: ui.gray[200]
+    primary: { main: color.accent, dark: color.accentPressed, light: color.accentSubtle },
+    error: { main: color.danger },
+    success: { main: color.success },
+    warning: { main: color.warning },
+    background: { default: color.sunken, paper: color.canvas },
+    text: { primary: color.text, secondary: color.textSecondary, disabled: color.textDisabled },
+    divider: color.border
   },
-  shape: { borderRadius: 8 },
+  shape: { borderRadius: 0 },
   typography: {
-    // Segoe UI 우선: 숫자·영문을 Malgun Gothic 으로 그리면 작은 크기에서 깨져 보인다 (한글은 Malgun 폴백)
-    fontFamily: `'Segoe UI', 'Malgun Gothic', '맑은 고딕', -apple-system, Roboto, sans-serif`,
-    // 2026-07-13 사용자 피드백 "폰트가 작다" → 전체 한 단계 확대 (TailAdmin theme-sm 14px 상당 → 우리는 데스크톱 앱이라 +2px)
-    fontSize: 16,
-    body2: { fontSize: 15 },
-    caption: { fontSize: 13.5 },
-    button: { textTransform: 'none', fontWeight: 500, fontSize: 15 }
+    fontFamily: font.sans,
+    fontSize: font.md,
+    // MUI 의 rem 환산(htmlFontSize 16 기준)을 쓰지 않고 px 로 고정 — 클래식은 픽셀 단위로 맞춘다
+    htmlFontSize: 16,
+    body1: { fontSize: font.md, lineHeight: font.lhNormal },
+    body2: { fontSize: font.md, lineHeight: font.lhDense },
+    caption: { fontSize: font.xs, lineHeight: font.lhDense },
+    subtitle1: { fontSize: font.lg, fontWeight: font.bold, lineHeight: font.lhDense },
+    subtitle2: { fontSize: font.md, fontWeight: font.semibold, lineHeight: font.lhDense },
+    h6: { fontSize: font.xl, fontWeight: font.bold, lineHeight: font.lhTight },
+    button: { textTransform: 'none', fontWeight: font.semibold, fontSize: font.md, lineHeight: font.lhTight }
   },
   components: {
+    MuiCssBaseline: { styleOverrides: { body: { fontFamily: font.sans } } },
+    MuiButtonBase: { defaultProps: { disableRipple: true } },
     MuiButton: {
-      defaultProps: { disableElevation: true },
+      defaultProps: { disableElevation: true, size: 'small' },
       styleOverrides: {
         root: {
-          borderRadius: 8,
-          fontWeight: 500,
-          paddingLeft: 16,
-          paddingRight: 16,
-          // TailAdmin 버튼 규약: 키보드 포커스에 브랜드 포커스 링
-          '&.Mui-focusVisible': { boxShadow: ui.shadow.focusRing }
+          borderRadius: 0,
+          minWidth: 0,
+          height: size.ctlMd,
+          padding: `0 ${space.lg}px`,
+          gap: space.sm,
+          boxShadow: 'none',
+          '&.Mui-focusVisible': focusRing,
+          '& .MuiButton-startIcon': { marginRight: space.sm, marginLeft: 0 },
+          '& .MuiButton-startIcon > *:first-of-type': { fontSize: size.icon },
+          '&.Mui-disabled': { color: color.textDisabled, borderColor: color.border }
         },
+        // 주 버튼: accent 채움 + 진한 테두리. 한 화면에 하나
         contained: {
-          boxShadow: ui.shadow.xs,
-          '&:hover': { boxShadow: ui.shadow.xs }
+          border: `1px solid ${color.accentPressed}`,
+          '&:hover': { backgroundColor: color.accentHover, boxShadow: 'none' },
+          '&:active': { backgroundColor: color.accentPressed },
+          '&.Mui-disabled': { backgroundColor: color.controlBottom, color: color.textDisabled, borderColor: color.border }
         },
+        // 기본 버튼: 흰→회색 베벨 면 + 1px 진한 테두리
         outlined: {
-          backgroundColor: '#fff',
-          borderColor: ui.gray[300],
-          color: ui.gray[700],
-          '&:hover': { backgroundColor: ui.gray[50], borderColor: ui.gray[300] }
+          background: surface.bevel,
+          border: `1px solid ${color.buttonBorder}`,
+          color: color.text,
+          '&:hover': { background: surface.bevelHover, borderColor: color.hoverEdge },
+          '&:active': { background: surface.bevelPressed },
+          '&.Mui-disabled': { background: color.sunken }
         },
-        textInherit: { color: ui.gray[700], '&:hover': { backgroundColor: ui.gray[100] } },
         outlinedInherit: {
-          backgroundColor: '#fff',
-          borderColor: ui.gray[300],
-          color: ui.gray[700],
-          '&:hover': { backgroundColor: ui.gray[50], borderColor: ui.gray[300] }
-        }
+          background: surface.bevel,
+          border: `1px solid ${color.buttonBorder}`,
+          color: color.text,
+          '&:hover': { background: surface.bevelHover, borderColor: color.hoverEdge }
+        },
+        text: { '&:hover': { backgroundColor: color.hover } },
+        textInherit: { color: color.text, '&:hover': { backgroundColor: color.hover } }
       }
     },
     MuiIconButton: {
+      defaultProps: { size: 'small', disableRipple: true },
       styleOverrides: {
-        root: { color: ui.gray[700], '&:hover': { backgroundColor: ui.gray[100] } }
+        root: {
+          borderRadius: 0,
+          width: size.ctlSm,
+          height: size.ctlSm,
+          padding: 0,
+          color: color.textSecondary,
+          border: '1px solid transparent',
+          '& svg': { fontSize: size.icon },
+          '&:hover': { backgroundColor: color.canvas, borderColor: color.hoverEdge, color: color.text },
+          '&:active': { background: surface.pressed, borderColor: chrome.toolbarEdge },
+          '&.Mui-focusVisible': focusRing,
+          '&.Mui-disabled': { color: color.textDisabled }
+        }
+      }
+    },
+    MuiInputBase: {
+      styleOverrides: {
+        root: { fontSize: font.md, backgroundColor: color.input },
+        input: { padding: `0 ${space.sm}px`, height: size.ctlMd, boxSizing: 'border-box' }
       }
     },
     MuiOutlinedInput: {
       styleOverrides: {
         root: {
-          borderRadius: 8,
-          backgroundColor: '#fff',
-          boxShadow: ui.shadow.xs,
-          '& .MuiOutlinedInput-notchedOutline': { borderColor: ui.gray[300] },
-          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: ui.gray[400] },
-          '&.Mui-focused': { boxShadow: ui.shadow.focusRing },
-          '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: ui.brand[500], borderWidth: 1 }
-        }
+          borderRadius: 0,
+          height: size.ctlMd,
+          backgroundColor: color.input,
+          '& .MuiOutlinedInput-notchedOutline': { borderColor: color.borderStrong, borderWidth: 1 },
+          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: color.borderStrong },
+          '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: color.accent, borderWidth: 1 }
+        },
+        input: { padding: `0 ${space.sm}px` }
+      }
+    },
+    MuiSelect: {
+      defaultProps: { size: 'small' },
+      styleOverrides: {
+        select: {
+          fontSize: font.md,
+          paddingTop: 0,
+          paddingBottom: 0,
+          minHeight: 0,
+          display: 'flex',
+          alignItems: 'center'
+        },
+        icon: { fontSize: size.icon, right: 2, color: color.textSecondary }
       }
     },
     MuiMenu: {
-      defaultProps: { elevation: 0 },
+      defaultProps: { elevation: 0, transitionDuration: 0 },
       styleOverrides: {
-        paper: { borderRadius: 12, border: `1px solid ${ui.gray[200]}`, boxShadow: ui.shadow.lg, marginTop: 4 },
-        list: { padding: 6 }
+        paper: {
+          borderRadius: 0,
+          border: `1px solid ${color.borderStrong}`,
+          boxShadow: shadow.raised,
+          marginTop: 1
+        },
+        list: { padding: space.xs }
       }
     },
     MuiPopover: {
-      defaultProps: { elevation: 0 },
+      defaultProps: { elevation: 0, transitionDuration: 0 },
       styleOverrides: {
-        paper: { borderRadius: 12, border: `1px solid ${ui.gray[200]}`, boxShadow: ui.shadow.lg }
+        paper: { borderRadius: 0, border: `1px solid ${color.borderStrong}`, boxShadow: shadow.raised }
       }
     },
     MuiMenuItem: {
       styleOverrides: {
         root: {
-          borderRadius: 8,
-          margin: '1px 0',
-          fontSize: 15.5,
-          fontWeight: 500,
-          color: ui.gray[700],
-          '&:hover': { backgroundColor: ui.gray[100] },
-          '&.Mui-selected': { backgroundColor: ui.brand[50], color: ui.brand[500] },
-          '&.Mui-selected:hover': { backgroundColor: ui.brand[100] }
+          borderRadius: 0,
+          minHeight: size.row,
+          // MUI 는 600px 이상에서 minHeight:auto 로 줄인다 — 클래식 22px 행을 지킨다
+          '@media (min-width: 600px)': { minHeight: size.row },
+          fontSize: font.md,
+          padding: `0 ${space.base}px`,
+          color: color.text,
+          '&:hover': { backgroundColor: chrome.toolbarFace },
+          '&.Mui-selected': { backgroundColor: color.accent, color: color.textOnAccent },
+          '&.Mui-selected:hover': { backgroundColor: color.accentHover },
+          '&.Mui-focusVisible': focusRing
         }
       }
     },
+    MuiDivider: { styleOverrides: { root: { borderColor: color.border } } },
     MuiDialog: {
+      defaultProps: { transitionDuration: 0 },
       styleOverrides: {
-        paper: { borderRadius: 16, boxShadow: ui.shadow.lg }
+        paper: { borderRadius: 0, border: `1px solid ${chrome.frame}`, boxShadow: shadow.dialog }
       }
     },
-    MuiDialogTitle: { styleOverrides: { root: { fontWeight: 700, color: ui.gray[900] } } },
-    MuiTooltip: {
-      defaultProps: { arrow: true, enterDelay: 500 },
-      styleOverrides: {
-        tooltip: { backgroundColor: ui.gray[800], borderRadius: 8, fontSize: 13.5, fontWeight: 500, padding: '7px 12px' },
-        arrow: { color: ui.gray[800] }
-      }
-    },
-    MuiToggleButtonGroup: {
-      styleOverrides: {
-        root: { backgroundColor: ui.gray[100], borderRadius: 8, padding: 2, gap: 2 }
-      }
-    },
-    MuiToggleButton: {
+    // 덮개는 대화상자에만 — 메뉴·팝오버의 투명 백드롭까지 어두워지지 않게
+    MuiBackdrop: { styleOverrides: { root: { '&:not(.MuiBackdrop-invisible)': { backgroundColor: color.scrim } } } },
+    MuiDialogTitle: {
       styleOverrides: {
         root: {
-          border: 0,
-          borderRadius: '6px !important',
-          padding: '4px 12px',
-          color: ui.gray[500],
-          fontWeight: 500,
-          '&:hover': { backgroundColor: ui.gray[200] },
-          '&.Mui-selected': { backgroundColor: '#fff', color: ui.gray[900], boxShadow: ui.shadow.xs },
-          '&.Mui-selected:hover': { backgroundColor: '#fff' }
+          fontSize: font.xl,
+          fontWeight: font.bold,
+          padding: `${space.base}px ${space.lg}px`,
+          background: surface.chrome,
+          borderBottom: `1px solid ${chrome.frame}`,
+          cursor: 'move',
+          userSelect: 'none'
+        }
+      }
+    },
+    MuiDialogContent: { styleOverrides: { root: { padding: space.lg } } },
+    MuiDialogActions: {
+      styleOverrides: {
+        root: { padding: space.base, gap: space.base, borderTop: `1px solid ${color.border}`, background: surface.status }
+      }
+    },
+    MuiTooltip: {
+      defaultProps: { arrow: false, enterDelay: 400, disableInteractive: true },
+      styleOverrides: {
+        tooltip: {
+          backgroundColor: color.warningSubtle,
+          color: color.text,
+          border: `1px solid ${color.borderStrong}`,
+          borderRadius: 0,
+          boxShadow: shadow.raised,
+          fontSize: font.xs,
+          fontWeight: font.regular,
+          padding: `${space.xs}px ${space.md}px`
+        }
+      }
+    },
+    MuiSlider: {
+      defaultProps: { size: 'small' },
+      styleOverrides: {
+        root: { height: 4, padding: '10px 0', color: color.accent },
+        rail: { backgroundColor: color.controlBottom, opacity: 1, borderRadius: 0, border: `1px solid ${color.borderStrong}` },
+        track: { borderRadius: 0, border: 'none' },
+        thumb: {
+          width: 10,
+          height: 16,
+          borderRadius: 0,
+          background: surface.bevel,
+          border: `1px solid ${color.borderStrong}`,
+          '&:hover, &.Mui-focusVisible, &.Mui-active': { boxShadow: 'none', borderColor: color.accent }
         }
       }
     },
     MuiPaper: {
+      defaultProps: { elevation: 0 },
       styleOverrides: {
-        outlined: { borderColor: ui.gray[200] }
+        root: { backgroundImage: 'none', borderRadius: 0 },
+        outlined: { borderColor: color.borderStrong }
       }
     },
-    MuiSelect: {
+    MuiAlert: {
       styleOverrides: {
-        select: { fontSize: 15.5 }
+        root: {
+          borderRadius: 0,
+          border: `1px solid ${color.borderStrong}`,
+          fontSize: font.md,
+          padding: `${space.xs}px ${space.base}px`,
+          alignItems: 'center'
+        },
+        icon: { padding: 0, marginRight: space.md, '& svg': { fontSize: size.icon } },
+        message: { padding: 0 },
+        action: { padding: 0, marginRight: 0 }
       }
-    }
+    },
+    MuiSnackbar: { defaultProps: { transitionDuration: 0 } },
+    MuiLinearProgress: {
+      styleOverrides: {
+        root: { height: 10, borderRadius: 0, border: `1px solid ${color.borderStrong}`, backgroundColor: color.canvas },
+        bar: { borderRadius: 0, backgroundColor: color.accent }
+      }
+    },
+    MuiCircularProgress: { defaultProps: { size: 14, thickness: 5 } }
   }
 })

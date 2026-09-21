@@ -1,0 +1,8 @@
+out/
+release/
+node_modules/
+build/
+docs/
+*.md
+package-lock.json
+src/renderer/src/styles/skins.ts

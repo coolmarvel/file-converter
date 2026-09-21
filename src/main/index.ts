@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, protocol, net, clipboard, nativeImage } from 'electron'
 import { join, basename, normalize } from 'path'
 import { writeFile, mkdir } from 'fs/promises'
 import { pathToFileURL } from 'url'
@@ -7,14 +7,10 @@ import { pathToFileURL } from 'url'
 // @imgly/background-removal 은 모델·wasm 을 fetch(publicPath + …)로 가져온다.
 // 패키징 시 extraResources 로 resources/bgrm-data 에 풀어두고(asar 밖) 커스텀
 // 프로토콜로 서빙 → 완전 오프라인. 등록은 app ready 전에 해야 한다.
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'bgrm', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
-])
+protocol.registerSchemesAsPrivileged([{ scheme: 'bgrm', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }])
 
 function bgrmDataDir(): string {
-  return app.isPackaged
-    ? join(process.resourcesPath, 'bgrm-data')
-    : join(app.getAppPath(), 'node_modules/@imgly/background-removal-data/dist')
+  return app.isPackaged ? join(process.resourcesPath, 'bgrm-data') : join(app.getAppPath(), 'node_modules/@imgly/background-removal-data/dist')
 }
 
 function createWindow(): void {
@@ -24,6 +20,10 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    // 클래식 전환(v1.4.0): OS 창틀 대신 앱이 타이틀바를 그린다 (TitleBar.tsx).
+    // 설치형 업무 앱으로 읽히게 — 웹 페이지 흔적을 없앤다.
+    frame: false,
+    backgroundColor: '#f5f6f8',
     autoHideMenuBar: true,
     title: '파일 변환기',
     icon: app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(__dirname, '../../build/icon.png'),
@@ -35,6 +35,11 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => mainWindow.show())
+
+  // 자체 타이틀바가 최대화/복원 아이콘을 바꿀 수 있게 상태를 알린다
+  const pushMaximized = (): void => mainWindow.webContents.send('win:maximized', mainWindow.isMaximized())
+  mainWindow.on('maximize', pushMaximized)
+  mainWindow.on('unmaximize', pushMaximized)
 
   // 렌더러가 메모리 부족 등으로 죽으면(대용량 PDF 등) 앱이 그냥 꺼진 것처럼 보인다
   // → 창을 자동으로 다시 로드해 복구한다. (반복 크래시 루프 방지로 10초에 1회만)
@@ -91,6 +96,31 @@ ipcMain.handle('fs:writeInDir', async (_e, dirPath: string, fileName: string, da
   const full = join(dirPath, basename(fileName))
   await writeFile(full, Buffer.from(data))
   return full
+})
+
+// ── IPC: 창 제어 (프레임 없는 창의 타이틀바 버튼) ────────────────────────
+
+function senderWindow(e: Electron.IpcMainInvokeEvent): BrowserWindow | null {
+  return BrowserWindow.fromWebContents(e.sender)
+}
+
+ipcMain.handle('win:minimize', (e) => senderWindow(e)?.minimize())
+ipcMain.handle('win:toggleMaximize', (e) => {
+  const w = senderWindow(e)
+  if (!w) return false
+  if (w.isMaximized()) w.unmaximize()
+  else w.maximize()
+  return w.isMaximized()
+})
+ipcMain.handle('win:close', (e) => senderWindow(e)?.close())
+ipcMain.handle('win:isMaximized', (e) => senderWindow(e)?.isMaximized() ?? false)
+
+/** 변환 결과(PNG)를 시스템 클립보드로 — Compositor "Copy Merged" 처럼 저장 없이 다른 앱에 바로 붙여넣기 */
+ipcMain.handle('clip:writeImage', (_e, png: Uint8Array) => {
+  const img = nativeImage.createFromBuffer(Buffer.from(png))
+  if (img.isEmpty()) return false
+  clipboard.writeImage(img)
+  return true
 })
 
 /** 저장한 파일/폴더를 탐색기에서 열기 */

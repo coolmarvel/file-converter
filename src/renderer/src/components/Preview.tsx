@@ -1,50 +1,144 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
-import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
 import IconButton from '@mui/material/IconButton'
 import Button from '@mui/material/Button'
-import Tooltip from '@mui/material/Tooltip'
 import RemoveRounded from '@mui/icons-material/RemoveRounded'
 import AddRounded from '@mui/icons-material/AddRounded'
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded'
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded'
-import FitScreenRounded from '@mui/icons-material/FitScreenRounded'
+import GridOnRounded from '@mui/icons-material/GridOnRounded'
+import { Adjustments, hasAdjust, applyAdjustments, CanvasSizeOptions, changesCanvas, canvasTarget, anchorOffset } from '@core/index'
 import type { PdfHandle } from '../convert/pdf' // 런타임(pdf.js)은 PDF 소스일 때만 지연 로딩
-import { blobPart, targetSize, ResizeOpts, Transform, CropRect, hasCrop, loadImageFromUrl, removeWhiteBg } from '../convert/image'
+import { bytesToUrl, targetSize, ResizeOpts, Transform, CropRect, hasCrop, loadImageFromUrl, removeWhitePixels } from '../convert/image'
 import { WatermarkOpts } from '../watermark/model'
 import { WatermarkOverlay } from './WatermarkOverlay'
 import { ui } from '../theme'
 
+const { color, chrome, size, space, font, surface } = ui
 const pct = (v: number): string => `${v * 100}%`
 
-/** 자르기 드래그 상태 */
+/** 화면 배율(출력 1px 당 CSS px) 범위 */
+const MIN_SCALE = 0.02
+const MAX_SCALE = 32
+/** 이 배율 이상이면 픽셀 그리드 (Compositor: 확대 시 픽셀 격자) */
+const GRID_FROM = 8
+/** 미리보기 픽셀 패스(보정·흰색제거) 작업 해상도 상한 */
+const PASS_MAX_SIDE = 1600
+
+// ── 자르기 ────────────────────────────────────────────────────────────────
+
+type Corner = 'nw' | 'ne' | 'sw' | 'se'
 type CropDrag =
-  | { kind: 'new'; startX: number; startY: number }
-  | { kind: 'move'; startX: number; startY: number; orig: CropRect }
-  | { kind: 'resize'; corner: 'nw' | 'ne' | 'sw' | 'se'; anchorX: number; anchorY: number }
+  { kind: 'new'; ax: number; ay: number } | { kind: 'move'; startX: number; startY: number; orig: CropRect } | { kind: 'resize'; ax: number; ay: number; cx: number; cy: number; ratio: number }
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
 
 /**
- * 자르기 레이어 — 프레임 위에서 드래그로 영역을 그리고(그림판 방식), 안쪽 드래그 = 이동,
- * 모서리 핸들 = 크기 조절. 바깥은 어둡게(dim) 표시해 어디까지 잘리는지 보여준다.
- * 좌표는 프레임 기준 0~1 정규화 — 변환 파이프라인의 CropRect와 동일 좌표계.
+ * 앵커 (ax,ay) 에서 포인터 (px,py) 까지의 사각형.
+ * r = 정규화 좌표 기준 가로/세로 비 (null = 자유), sym = 앵커가 가운데(Alt 대칭 — Compositor Option 대칭 자르기).
+ * 비율이 있으면 프레임 밖으로 나가지 않게 비율을 지킨 채 줄인다.
  */
-function CropLayer({ crop, active, onCrop }: { crop: CropRect | null; active: boolean; onCrop: (c: CropRect | null) => void }): JSX.Element | null {
+function rectFrom(ax: number, ay: number, px: number, py: number, r: number | null, sym: boolean): CropRect {
+  const sx = px >= ax ? 1 : -1
+  const sy = py >= ay ? 1 : -1
+  let w = Math.abs(px - ax)
+  let h = Math.abs(py - ay)
+  const maxW = sym ? Math.min(ax, 1 - ax) : sx > 0 ? 1 - ax : ax
+  const maxH = sym ? Math.min(ay, 1 - ay) : sy > 0 ? 1 - ay : ay
+  if (r) {
+    w = Math.max(w, h * r)
+    w = Math.min(w, maxW, maxH * r)
+    h = w / r
+  } else {
+    w = Math.min(w, maxW)
+    h = Math.min(h, maxH)
+  }
+  if (sym) return { x: ax - w, y: ay - h, w: w * 2, h: h * 2 }
+  return { x: sx > 0 ? ax : ax - w, y: sy > 0 ? ay : ay - h, w, h }
+}
+
+/** 가장자리·가운데 스냅 (자유 비율일 때만) — 움직이는 변을 0/0.5/1 에 붙인다 */
+function snapRect(c: CropRect, tolX: number, tolY: number, move: boolean): CropRect {
+  const snap = (v: number, tol: number): number => {
+    for (const t of [0, 0.5, 1]) if (Math.abs(v - t) < tol) return t
+    return v
+  }
+  if (move) {
+    // 왼쪽·오른쪽·가운데 중 가장 가까운 것 하나로
+    const cands = [
+      { v: c.x, off: 0 },
+      { v: c.x + c.w, off: c.w },
+      { v: c.x + c.w / 2, off: c.w / 2 }
+    ]
+    let x = c.x
+    for (const k of cands) {
+      const s = snap(k.v, tolX)
+      if (s !== k.v) {
+        x = s - k.off
+        break
+      }
+    }
+    const candsY = [
+      { v: c.y, off: 0 },
+      { v: c.y + c.h, off: c.h },
+      { v: c.y + c.h / 2, off: c.h / 2 }
+    ]
+    let y = c.y
+    for (const k of candsY) {
+      const s = snap(k.v, tolY)
+      if (s !== k.v) {
+        y = s - k.off
+        break
+      }
+    }
+    return { ...c, x: Math.min(1 - c.w, Math.max(0, x)), y: Math.min(1 - c.h, Math.max(0, y)) }
+  }
+  const x1 = snap(c.x, tolX)
+  const y1 = snap(c.y, tolY)
+  const x2 = snap(c.x + c.w, tolX)
+  const y2 = snap(c.y + c.h, tolY)
+  return { x: x1, y: y1, w: Math.max(0, x2 - x1), h: Math.max(0, y2 - y1) }
+}
+
+/**
+ * 자르기 레이어 — 프레임 위에서 드래그로 영역을 그리고(그림판 방식), 안쪽 드래그 = 이동, 모서리 = 크기 조절.
+ * Shift = 비율 고정, Alt = 가운데 기준 대칭, 자유 비율이면 가장자리·가운데에 스냅.
+ * 바깥은 어둡게 — 어디까지 잘리는지 보인다. 좌표는 프레임 기준 0~1 (변환 파이프라인의 CropRect 와 동일).
+ */
+function CropLayer({
+  crop,
+  active,
+  onCrop,
+  aspect,
+  frame
+}: {
+  crop: CropRect | null
+  active: boolean
+  onCrop: (c: CropRect | null) => void
+  /** 출력 픽셀 기준 가로/세로 비 (null = 자유) */
+  aspect: number | null
+  /** 프레임 화면 크기(CSS px) — 비율·스냅 환산용 */
+  frame: { w: number; h: number }
+}): JSX.Element | null {
   const boxRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<CropDrag | null>(null)
 
   if (!active && !hasCrop(crop)) return null
 
+  // 출력 비율 → 정규화 좌표 비율 (프레임이 정사각이 아니면 다르다)
+  const toNorm = (a: number): number => (a * frame.h) / Math.max(1, frame.w)
+  const tolX = 6 / Math.max(1, frame.w)
+  const tolY = 6 / Math.max(1, frame.h)
+
   const norm = (e: React.PointerEvent): { x: number; y: number } => {
     const r = boxRef.current!.getBoundingClientRect()
-    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }
+    return { x: clamp01((e.clientX - r.left) / r.width), y: clamp01((e.clientY - r.top) / r.height) }
   }
-  const rectFrom = (x1: number, y1: number, x2: number, y2: number): CropRect => ({
-    x: Math.min(x1, x2),
-    y: Math.min(y1, y2),
-    w: Math.abs(x2 - x1),
-    h: Math.abs(y2 - y1)
-  })
+  const ratioFor = (e: React.PointerEvent, current: number | null): number | null => {
+    if (aspect) return toNorm(aspect)
+    if (e.shiftKey) return current ?? toNorm(1)
+    return null
+  }
 
   const down = (e: React.PointerEvent, drag: CropDrag): void => {
     if (!active) return
@@ -57,17 +151,17 @@ function CropLayer({ crop, active, onCrop }: { crop: CropRect | null; active: bo
     const d = dragRef.current
     if (!d) return
     const p = norm(e)
-    if (d.kind === 'new') onCrop(rectFrom(d.startX, d.startY, p.x, p.y))
-    else if (d.kind === 'resize') onCrop(rectFrom(d.anchorX, d.anchorY, p.x, p.y))
-    else {
-      const dx = p.x - d.startX
-      const dy = p.y - d.startY
-      onCrop({
-        ...d.orig,
-        x: Math.min(1 - d.orig.w, Math.max(0, d.orig.x + dx)),
-        y: Math.min(1 - d.orig.h, Math.max(0, d.orig.y + dy))
-      })
+    if (d.kind === 'move') {
+      const next = { ...d.orig, x: Math.min(1 - d.orig.w, Math.max(0, d.orig.x + p.x - d.startX)), y: Math.min(1 - d.orig.h, Math.max(0, d.orig.y + p.y - d.startY)) }
+      onCrop(snapRect(next, tolX, tolY, true))
+      return
     }
+    const sym = e.altKey
+    const ax = d.kind === 'resize' && sym ? d.cx : d.ax
+    const ay = d.kind === 'resize' && sym ? d.cy : d.ay
+    const r = ratioFor(e, d.kind === 'resize' ? d.ratio : null)
+    const rect = rectFrom(ax, ay, p.x, p.y, r, sym)
+    onCrop(r ? rect : snapRect(rect, tolX, tolY, false))
   }
   const up = (): void => {
     const d = dragRef.current
@@ -76,19 +170,12 @@ function CropLayer({ crop, active, onCrop }: { crop: CropRect | null; active: bo
     if (d && crop && (crop.w < 0.01 || crop.h < 0.01)) onCrop(null)
   }
 
-  const handles: { corner: 'nw' | 'ne' | 'sw' | 'se'; left: number; top: number; cursor: string }[] = crop
-    ? [
-        { corner: 'nw', left: crop.x, top: crop.y, cursor: 'nwse-resize' },
-        { corner: 'ne', left: crop.x + crop.w, top: crop.y, cursor: 'nesw-resize' },
-        { corner: 'sw', left: crop.x, top: crop.y + crop.h, cursor: 'nesw-resize' },
-        { corner: 'se', left: crop.x + crop.w, top: crop.y + crop.h, cursor: 'nwse-resize' }
-      ]
-    : []
-  // 핸들의 반대편 모서리가 리사이즈 앵커
-  const anchorOf = (corner: string): { x: number; y: number } => ({
-    x: corner.includes('w') ? crop!.x + crop!.w : crop!.x,
-    y: corner.includes('n') ? crop!.y + crop!.h : crop!.y
-  })
+  const corners: { corner: Corner; cursor: string }[] = [
+    { corner: 'nw', cursor: 'nwse-resize' },
+    { corner: 'ne', cursor: 'nesw-resize' },
+    { corner: 'sw', cursor: 'nesw-resize' },
+    { corner: 'se', cursor: 'nwse-resize' }
+  ]
 
   return (
     <Box
@@ -96,20 +183,12 @@ function CropLayer({ crop, active, onCrop }: { crop: CropRect | null; active: bo
       onPointerDown={(e) => {
         if (!active) return
         const p = norm(e)
-        down(e, { kind: 'new', startX: p.x, startY: p.y })
+        down(e, { kind: 'new', ax: p.x, ay: p.y })
         onCrop({ x: p.x, y: p.y, w: 0, h: 0 })
       }}
       onPointerMove={move}
       onPointerUp={up}
-      sx={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 3,
-        overflow: 'hidden', // dim(box-shadow)이 프레임 밖으로 새지 않게
-        cursor: active ? 'crosshair' : 'default',
-        pointerEvents: active ? 'auto' : 'none',
-        touchAction: 'none'
-      }}
+      sx={{ position: 'absolute', inset: 0, zIndex: 3, overflow: 'hidden', cursor: active ? 'crosshair' : 'default', pointerEvents: active ? 'auto' : 'none', touchAction: 'none' }}
     >
       {hasCrop(crop) && (
         <Box
@@ -125,33 +204,39 @@ function CropLayer({ crop, active, onCrop }: { crop: CropRect | null; active: bo
             top: pct(crop.y),
             width: pct(crop.w),
             height: pct(crop.h),
-            border: `2px dashed ${ui.brand[500]}`,
-            boxShadow: '0 0 0 100000px rgba(15, 23, 42, 0.45)', // 바깥 어둡게 = 잘려나갈 부분
+            outline: `1px dashed ${color.canvas}`,
+            border: `1px dashed ${color.accent}`,
+            boxShadow: '0 0 0 100000px rgba(0, 0, 0, 0.55)', // 바깥 어둡게 = 잘려나갈 부분
             cursor: active ? 'move' : 'default',
             pointerEvents: active ? 'auto' : 'none',
-            touchAction: 'none'
+            touchAction: 'none',
+            // 3분할 안내선 (구도 잡기)
+            backgroundImage: active
+              ? `linear-gradient(to right, transparent 33.2%, rgba(255,255,255,.35) 33.2%, rgba(255,255,255,.35) 33.5%, transparent 33.5%, transparent 66.5%, rgba(255,255,255,.35) 66.5%, rgba(255,255,255,.35) 66.8%, transparent 66.8%), linear-gradient(to bottom, transparent 33.2%, rgba(255,255,255,.35) 33.2%, rgba(255,255,255,.35) 33.5%, transparent 33.5%, transparent 66.5%, rgba(255,255,255,.35) 66.5%, rgba(255,255,255,.35) 66.8%, transparent 66.8%)`
+              : 'none'
           }}
         >
           {active &&
-            handles.map((h) => (
+            corners.map((h) => (
               <Box
                 key={h.corner}
                 onPointerDown={(e) => {
-                  const a = anchorOf(h.corner)
-                  down(e, { kind: 'resize', corner: h.corner, anchorX: a.x, anchorY: a.y })
+                  const ax = h.corner.includes('w') ? crop.x + crop.w : crop.x
+                  const ay = h.corner.includes('n') ? crop.y + crop.h : crop.y
+                  down(e, { kind: 'resize', ax, ay, cx: crop.x + crop.w / 2, cy: crop.y + crop.h / 2, ratio: crop.w / crop.h })
                 }}
                 onPointerMove={move}
                 onPointerUp={up}
                 sx={{
                   position: 'absolute',
-                  // crop 박스 내부 기준 좌표로 환산
-                  left: `calc(${pct((h.left - crop.x) / crop.w)} - 6px)`,
-                  top: `calc(${pct((h.top - crop.y) / crop.h)} - 6px)`,
-                  width: 12,
-                  height: 12,
-                  bgcolor: '#fff',
-                  border: `2px solid ${ui.brand[500]}`,
-                  borderRadius: '2px',
+                  left: h.corner.includes('w') ? -5 : 'auto',
+                  right: h.corner.includes('e') ? -5 : 'auto',
+                  top: h.corner.includes('n') ? -5 : 'auto',
+                  bottom: h.corner.includes('s') ? -5 : 'auto',
+                  width: 9,
+                  height: 9,
+                  bgcolor: color.canvas,
+                  border: `1px solid ${color.text}`,
                   cursor: h.cursor,
                   touchAction: 'none'
                 }}
@@ -163,46 +248,92 @@ function CropLayer({ crop, active, onCrop }: { crop: CropRect | null; active: bo
   )
 }
 
+// ── 미리보기 ─────────────────────────────────────────────────────────────
+
 /**
  * 미리보기 소스.
  * - images: object URL 배열. **URL 소유권은 호출측(App)** — Preview는 revoke하지 않는다.
  * - pdf: 페이지 수를 pdf.js로 조회하고 현재 페이지만 지연 렌더. 렌더 URL은 **Preview 소유**.
  */
-export type PreviewSource =
-  | { type: 'images'; urls: string[] }
-  | { type: 'pdf'; bytes: Uint8Array; scale: number }
-  | null
+export type PreviewSource = { type: 'images'; urls: string[] } | { type: 'pdf'; bytes: Uint8Array; scale: number } | null
 
 function keyOf(source: PreviewSource): string {
   if (!source) return 'none'
   return source.type === 'images' ? `img:${source.urls.join('|')}` : `pdf:${source.bytes.length}:${source.scale}`
 }
 
+export interface PreviewHandle {
+  zoomIn(): void
+  zoomOut(): void
+  fit(): void
+  actual(): void
+}
+
 export interface PreviewProps {
   source: PreviewSource
-  /** 변환 옵션을 미리보기에 실시간 반영 — 보이는 그대로가 결과물 (pdf-editor 방식, 2026-07-13 피드백) */
+  /** 변환 옵션을 미리보기에 실시간 반영 — 보이는 그대로가 결과물 */
   watermark?: WatermarkOpts
   transform?: Transform
   resize?: ResizeOpts
-  /** 자르기: 영역(정규화)과 편집 모드 */
+  adjust?: Adjustments
+  canvasSize?: CanvasSizeOptions | null
+  /** 자르기: 영역(정규화)과 편집 모드, 비율(출력 px 기준) */
   crop?: CropRect | null
   cropMode?: boolean
+  cropAspect?: number | null
   onCrop?: (c: CropRect | null) => void
   /** 흰색→투명 실시간 미리보기 (null=끔) */
   whiteTolerance?: number | null
   /** 투명 배경 모드 — 체커보드 배경으로 투명 영역을 보여준다 */
   transparent?: boolean
+  /**
+   * 렌더 미리보기(v1.5.0): 필터·효과·내용 인식 채우기처럼 CSS 로 흉내 낼 수 없는 옵션이 켜지면 App 이 실제 파이프라인을
+   * 축소 배율로 돌린 결과를 소스로 넘긴다. 이때 이미지 픽셀 크기가 아니라 이 값(출력 픽셀)을 프레임 크기로 쓴다.
+   */
+  natOverride?: { w: number; h: number } | null
+  /** 출력 프레임 크기(px)·배율 보고 — 상태 줄·자르기 수치 입력용 */
+  onFrame?: (info: { w: number; h: number; zoomPct: number; page: number; pages: number } | null) => void
 }
 
-export function Preview({ source, watermark, transform, resize, crop = null, cropMode = false, onCrop, whiteTolerance = null, transparent = false }: PreviewProps): JSX.Element {
+/** 체커보드 (투명 표시) — 어두운 뷰어에 맞춘 어두운 두 칸 */
+const checkerSx = {
+  backgroundColor: color.checkerA,
+  backgroundImage: `linear-gradient(45deg, ${color.checkerB} 25%, transparent 25%, transparent 75%, ${color.checkerB} 75%), linear-gradient(45deg, ${color.checkerB} 25%, transparent 25%, transparent 75%, ${color.checkerB} 75%)`,
+  backgroundSize: '16px 16px',
+  backgroundPosition: '0 0, 8px 8px'
+} as const
+
+export const Preview = forwardRef<PreviewHandle, PreviewProps>(function Preview(
+  {
+    source,
+    watermark,
+    transform,
+    resize,
+    adjust,
+    canvasSize = null,
+    crop = null,
+    cropMode = false,
+    cropAspect = null,
+    onCrop,
+    whiteTolerance = null,
+    transparent = false,
+    natOverride = null,
+    onFrame
+  },
+  ref
+): JSX.Element {
   const [page, setPage] = useState(0)
   const [count, setCount] = useState(0)
   const [url, setUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(false) // 페이지 넘김 중 (이전 페이지는 계속 표시)
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState<number | null>(null) // null = 화면에 맞춤, 숫자 = 출력 1px 당 CSS px
+  const [grid, setGrid] = useState(true)
   const [stage, setStageSize] = useState({ w: 0, h: 0 })
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null) // 현재 표시 중인 이미지의 원본 픽셀 크기
   const roRef = useRef<ResizeObserver | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const wheelOff = useRef<(() => void) | null>(null)
+  const stepZoomRef = useRef<(dir: 1 | -1) => void>(() => {}) // 휠·명령이 최신 배율 계산을 쓰도록
   const pdfCache = useRef<Map<number, string>>(new Map())
   // PDF 문서는 소스당 한 번만 열고 재사용 — 페이지 넘김마다 재파싱하면 대용량에서 크래시
   const pdfDoc = useRef<PdfHandle | null>(null)
@@ -210,52 +341,86 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
 
   const sourceKey = keyOf(source)
 
-  // 스테이지 크기 추적 — 콜백 ref로 붙여야 스테이지가 뒤늦게 마운트돼도 측정된다(확대/축소 먹통 수정)
+  // 스테이지 크기 추적 — 콜백 ref로 붙여야 스테이지가 뒤늦게 마운트돼도 측정된다
   const setStage = useCallback((el: HTMLDivElement | null) => {
     roRef.current?.disconnect()
+    wheelOff.current?.()
+    stageRef.current = el
     if (!el) return
-    const update = () => setStageSize({ w: el.clientWidth - 16, h: el.clientHeight - 16 }) // padding 8*2
+    const update = (): void => setStageSize({ w: el.clientWidth - 2 * space.lg, h: el.clientHeight - 2 * space.lg })
     update()
     const ro = new ResizeObserver(update)
     ro.observe(el)
     roRef.current = ro
+    // Ctrl+휠 = 확대/축소 — passive 리스너로는 preventDefault 가 안 돼서 직접, 스테이지당 한 번만 붙인다
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      stepZoomRef.current(e.deltaY < 0 ? 1 : -1)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    wheelOff.current = () => el.removeEventListener('wheel', onWheel)
   }, [])
 
   // 소스 바뀌면 배율·원본 크기 초기화 (페이지 넘김은 유지 — 같은 문서는 보통 페이지 크기가 같아 깜빡임 방지)
   useEffect(() => {
-    setZoom(1)
+    setZoom(null)
     setNat(null)
   }, [sourceKey])
 
-  // 흰색→투명 실시간 미리보기: 표시 중인 이미지에 같은 픽셀 연산을 적용해 보여준다 (디바운스)
-  const [whiteUrl, setWhiteUrl] = useState<{ src: string; tol: number; out: string } | null>(null)
+  // ── 픽셀 패스: 보정 + 흰색제거를 원본 단계에서 (픽셀별 연산이라 기하와 순서가 무관 — image.ts finishCanvas 주석)
+  // 디코드 결과(축소본 ImageData)는 url 당 한 번만 만들고, 슬라이더가 움직일 때마다 복사본에만 연산한다.
+  const baseRef = useRef<{ url: string; data: ImageData } | null>(null)
+  const [passUrl, setPassUrl] = useState<{ src: string; key: string; out: string } | null>(null)
+  const passOn = hasAdjust(adjust) || whiteTolerance != null
+  const passKey = passOn ? JSON.stringify([adjust && hasAdjust(adjust) ? adjust : null, whiteTolerance]) : ''
   useEffect(() => {
-    if (whiteTolerance == null || !url) {
-      setWhiteUrl(null)
+    if (!passOn || !url) {
+      setPassUrl(null)
       return
     }
     let cancelled = false
     const timer = setTimeout(async () => {
       try {
-        const img = await loadImageFromUrl(url)
-        const k = Math.min(1, 2000 / Math.max(1, img.naturalWidth, img.naturalHeight)) // 미리보기용 상한
+        if (baseRef.current?.url !== url) {
+          const img = await loadImageFromUrl(url)
+          const k = Math.min(1, PASS_MAX_SIDE / Math.max(1, img.naturalWidth, img.naturalHeight))
+          const c = document.createElement('canvas')
+          c.width = Math.max(1, Math.round(img.naturalWidth * k))
+          c.height = Math.max(1, Math.round(img.naturalHeight * k))
+          const x = c.getContext('2d', { willReadFrequently: true })!
+          x.imageSmoothingQuality = 'high'
+          x.drawImage(img, 0, 0, c.width, c.height)
+          baseRef.current = { url, data: x.getImageData(0, 0, c.width, c.height) }
+        }
+        if (cancelled) return
+        const base = baseRef.current.data
+        const work = new ImageData(new Uint8ClampedArray(base.data), base.width, base.height)
+        if (adjust && hasAdjust(adjust)) applyAdjustments(work.data, adjust)
+        if (whiteTolerance != null) removeWhitePixels(work.data, whiteTolerance)
         const c = document.createElement('canvas')
-        c.width = Math.max(1, Math.round(img.naturalWidth * k))
-        c.height = Math.max(1, Math.round(img.naturalHeight * k))
-        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
-        removeWhiteBg(c, whiteTolerance)
-        if (!cancelled) setWhiteUrl({ src: url, tol: whiteTolerance, out: c.toDataURL('image/png') })
+        c.width = work.width
+        c.height = work.height
+        c.getContext('2d')!.putImageData(work, 0, 0)
+        const blob = await new Promise<Blob | null>((res) => c.toBlob(res, 'image/png'))
+        if (cancelled || !blob) return
+        const out = URL.createObjectURL(blob)
+        setPassUrl((prev) => {
+          if (prev) URL.revokeObjectURL(prev.out)
+          return { src: url, key: passKey, out }
+        })
       } catch {
-        if (!cancelled) setWhiteUrl(null)
+        if (!cancelled) setPassUrl(null)
       }
-    }, 180)
+    }, 90)
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [url, whiteTolerance])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, passKey])
 
-  const displayUrl = whiteTolerance != null && whiteUrl && whiteUrl.src === url ? whiteUrl.out : url
+  const displayUrl = passOn && passUrl && passUrl.src === url ? passUrl.out : url
 
   useEffect(() => {
     setPage(0)
@@ -313,14 +478,12 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
     const doc = pdfDoc.current
     if (!doc) return
     const gen = ++renderGen.current
-    // 이전 페이지를 그대로 보여주면서 렌더 — 프레임(이미지+워터마크 캔버스)을 매번
-    // 부수고 다시 만들지 않아야 캔버스 재할당 폭주가 없다. url은 준비되면 교체.
     setLoading(true)
     doc
       .renderPagePng(page, source.scale)
       .then((png) => {
         if (gen !== renderGen.current || pdfDoc.current !== doc) return // 더 최근 요청이 있거나 소스가 바뀜
-        const u = URL.createObjectURL(new Blob([blobPart(png)], { type: 'image/png' }))
+        const u = bytesToUrl(png, 'image/png')
         pdfCache.current.set(page, u)
         setUrl(u)
         setLoading(false)
@@ -339,75 +502,120 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
     }
   }, [])
 
+  // ── 기하: 원본 → 리사이즈 → 회전 → 캔버스 크기(종이). 종이가 곧 출력 프레임 ──
+  const rot = transform?.rotate ?? 0
+  const swap = rot === 90 || rot === 270
+  let geo: {
+    eff: { width: number; height: number }
+    box: { w: number; h: number } // 회전 반영된 이미지 박스 (출력 px)
+    paper: { w: number; h: number } // 캔버스 크기 반영된 종이 (출력 px)
+    off: { dx: number; dy: number }
+    fit: number
+  } | null = null
+  if (stage.w > 0 && stage.h > 0 && nat) {
+    const base = natOverride ?? nat
+    const eff = targetSize(base.w, base.h, resize)
+    const box = { w: swap ? eff.height : eff.width, h: swap ? eff.width : eff.height }
+    const hasCanvas = changesCanvas(box.w, box.h, canvasSize)
+    const t = hasCanvas ? canvasTarget(box.w, box.h, canvasSize!) : { width: box.w, height: box.h }
+    const off = hasCanvas ? anchorOffset(box.w, box.h, t.width, t.height, canvasSize!.anchor) : { dx: 0, dy: 0 }
+    geo = { eff, box, paper: { w: t.width, h: t.height }, off, fit: Math.min(stage.w / t.width, stage.h / t.height) }
+  }
+  const scale = geo ? Math.min(MAX_SCALE, Math.max(MIN_SCALE, zoom ?? geo.fit)) : 1
+
+  // 상태 줄·자르기 수치 입력에 프레임 정보 보고
+  const frameKey = geo ? `${geo.paper.w}x${geo.paper.h}@${Math.round(scale * 100)}:${page}/${count}` : ''
+  useEffect(() => {
+    onFrame?.(geo ? { w: geo.paper.w, h: geo.paper.h, zoomPct: Math.round(scale * 100), page, pages: count } : null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameKey])
+
+  // 배율 단계 — 클래식 뷰어의 고정 단계(Photoshop 식)
+  const STEPS = [0.02, 0.05, 0.1, 0.125, 0.167, 0.25, 0.333, 0.5, 0.667, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32]
+  const stepZoom = (dir: 1 | -1): void => {
+    const cur = scale
+    const next = dir > 0 ? (STEPS.find((s) => s > cur * 1.001) ?? MAX_SCALE) : ([...STEPS].reverse().find((s) => s < cur * 0.999) ?? MIN_SCALE)
+    setZoom(next)
+  }
+  stepZoomRef.current = stepZoom
+  useImperativeHandle(ref, () => ({ zoomIn: () => stepZoomRef.current(1), zoomOut: () => stepZoomRef.current(-1), fit: () => setZoom(null), actual: () => setZoom(1) }), [])
+
   if (!source || count === 0) {
     return (
-      <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Typography variant="caption" color="text.secondary">
-          파일을 선택하면 미리보기가 표시됩니다.
-        </Typography>
+      <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: color.viewer, color: color.textMuted }}>
+        {source ? '불러오는 중…' : '파일을 선택하면 미리보기가 표시됩니다.'}
       </Box>
     )
   }
 
-  // 100% = "화면에 맞춤"(pdf-editor 레이아웃 메뉴와 동일): 이미지/페이지 전체가 스크롤 없이
-  // 스테이지 안에 들어오는 배율. 가로·세로 중 더 넘치는 쪽 기준(contain). zoom은 그 배율의 배수.
-  // 원본 크기(nat)는 <img> onLoad에서 얻는다 — 측정 전에는 CSS contain 폴백으로 새지 않게.
-  // 변환 옵션도 반영: 리사이즈(비율 강제 포함) → 회전/반전(CSS transform) → 흑백(filter).
-  // 워터마크 오버레이는 회전된 프레임 위에 정방향으로 — 변환 처리 순서와 동일.
-  const rot = transform?.rotate ?? 0
-  const swap = rot === 90 || rot === 270
-  let frame: { w: number; h: number } | null = null // 회전 반영된 바깥 박스
-  let disp: { w: number; h: number } | null = null // 회전 전 이미지 표시 크기
-  if (stage.w > 0 && stage.h > 0 && nat) {
-    const eff = targetSize(nat.w, nat.h, resize) // 리사이즈가 비율을 바꾸면 미리보기 비율도 바뀐다
-    const boxW = swap ? eff.height : eff.width
-    const boxH = swap ? eff.width : eff.height
-    const fit = Math.min(stage.w / boxW, stage.h / boxH)
-    frame = { w: Math.max(40, Math.round(boxW * fit * zoom)), h: Math.max(40, Math.round(boxH * fit * zoom)) }
-    disp = { w: Math.max(1, Math.round(eff.width * fit * zoom)), h: Math.max(1, Math.round(eff.height * fit * zoom)) }
-  }
+  const paperPx = geo ? { w: Math.max(1, Math.round(geo.paper.w * scale)), h: Math.max(1, Math.round(geo.paper.h * scale)) } : null
   const imgTransform = `translate(-50%, -50%) rotate(${rot}deg) scale(${transform?.flipH ? -1 : 1}, ${transform?.flipV ? -1 : 1})`
   const imgFilter = transform?.grayscale ? 'grayscale(1)' : 'none'
+  const pixelated = scale >= 4
+  const paperBg =
+    canvasSize && changesCanvas(geo?.box.w ?? 0, geo?.box.h ?? 0, canvasSize) && canvasSize.background
+      ? { bgcolor: canvasSize.background }
+      : transparent || (canvasSize && !canvasSize.background)
+        ? checkerSx
+        : null
 
   return (
-    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <Stack direction="row" alignItems="center" spacing={0.6}>
-        <Tooltip title="축소">
-          <span>
-            <IconButton size="small" disabled={zoom <= 0.4} onClick={() => setZoom((z) => Math.max(0.4, +(z - 0.2).toFixed(2)))}>
-              <RemoveRounded fontSize="small" />
+    <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      {/* 뷰어 툴바 — 배율·맞춤·실제 크기·그리드·페이지 */}
+      <Box
+        sx={{
+          height: size.toolBar - 4,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: `${space.xs}px`,
+          px: `${space.sm}px`,
+          background: surface.toolbar,
+          borderBottom: `1px solid ${chrome.frame}`
+        }}
+      >
+        <IconButton onClick={() => stepZoom(-1)} disabled={scale <= MIN_SCALE} aria-label="축소" title="축소 (Ctrl+-)">
+          <RemoveRounded />
+        </IconButton>
+        <Box className="tnum" sx={{ minWidth: 44, textAlign: 'center', fontSize: font.md }}>
+          {Math.round(scale * 100)}%
+        </Box>
+        <IconButton onClick={() => stepZoom(1)} disabled={scale >= MAX_SCALE} aria-label="확대" title="확대 (Ctrl+=)">
+          <AddRounded />
+        </IconButton>
+        <Button variant="outlined" onClick={() => setZoom(null)} sx={{ height: size.ctlSm, px: `${space.base}px` }} title="화면에 맞춤 (Ctrl+0)">
+          맞춤
+        </Button>
+        <Button variant="outlined" onClick={() => setZoom(1)} sx={{ height: size.ctlSm, px: `${space.base}px` }} title="실제 크기 100% (Ctrl+1)">
+          100%
+        </Button>
+        <IconButton onClick={() => setGrid((g) => !g)} aria-pressed={grid} title={`픽셀 그리드 (${GRID_FROM * 100}% 이상에서 표시)`} sx={grid ? { color: color.accent } : undefined}>
+          <GridOnRounded />
+        </IconButton>
+        <Box sx={{ flex: 1 }} />
+        {count > 1 && (
+          <>
+            <IconButton disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} aria-label="이전 페이지" title="이전 페이지 (PageUp)">
+              <ChevronLeftRounded />
             </IconButton>
-          </span>
-        </Tooltip>
-        <Typography sx={{ fontSize: 14.5, minWidth: 48, textAlign: 'center', color: ui.gray[600] }}>
-          {Math.round(zoom * 100)}%
-        </Typography>
-        <Tooltip title="확대">
-          <span>
-            <IconButton size="small" disabled={zoom >= 4} onClick={() => setZoom((z) => Math.min(4, +(z + 0.2).toFixed(2)))}>
-              <AddRounded fontSize="small" />
+            <Box className="tnum" sx={{ minWidth: 56, textAlign: 'center' }}>
+              {page + 1} / {count}
+            </Box>
+            <IconButton disabled={page >= count - 1} onClick={() => setPage((p) => Math.min(count - 1, p + 1))} aria-label="다음 페이지" title="다음 페이지 (PageDown)">
+              <ChevronRightRounded />
             </IconButton>
-          </span>
-        </Tooltip>
-        <Tooltip title="화면에 맞춤 (100%)">
-          <Button size="small" color="inherit" startIcon={<FitScreenRounded />} onClick={() => setZoom(1)} sx={{ px: 1, minWidth: 0 }}>
-            맞춤
-          </Button>
-        </Tooltip>
-      </Stack>
+          </>
+        )}
+      </Box>
 
       <Box
         ref={setStage}
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          overflow: 'auto',
-          display: 'flex', // + 프레임의 m:'auto' → 화면보다 작으면 정중앙, 크면 스크롤
-          bgcolor: ui.gray[100],
-          border: `1px solid ${ui.gray[200]}`,
-          borderRadius: 2,
-          p: 1
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === 'PageDown') setPage((p) => Math.min(count - 1, p + 1))
+          if (e.key === 'PageUp') setPage((p) => Math.max(0, p - 1))
         }}
+        sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', bgcolor: color.viewer, p: `${space.lg}px`, outline: 'none' }}
       >
         {url ? (
           <Box
@@ -416,59 +624,73 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
               m: 'auto',
               flexShrink: 0,
               lineHeight: 0,
-              width: frame?.w,
-              height: frame?.h,
-              // 투명 배경 모드: 체커보드로 투명 영역을 보여준다
-              ...(transparent && {
-                backgroundImage: 'conic-gradient(#e2e8f0 0 25%, #ffffff 0 50%, #e2e8f0 0 75%, #ffffff 0)',
-                backgroundSize: '16px 16px',
-                borderRadius: 1
-              })
+              width: paperPx?.w,
+              height: paperPx?.h,
+              overflow: 'hidden',
+              outline: `1px solid ${color.checkerA}`,
+              ...paperBg
             }}
           >
-            <Box
-              component="img"
-              src={displayUrl ?? undefined}
-              alt="미리보기"
-              onLoad={(e: React.SyntheticEvent<HTMLImageElement>) => {
-                const el = e.currentTarget
-                // 흰색제거 미리보기(축소본)가 아니라 원본이 로드됐을 때만 원본 크기를 갱신
-                if (el.src !== url) return
-                if (el.naturalWidth && el.naturalHeight) setNat({ w: el.naturalWidth, h: el.naturalHeight })
-              }}
-              sx={
-                frame && disp
-                  ? {
-                      position: 'absolute',
-                      left: '50%',
-                      top: '50%',
-                      width: disp.w,
-                      height: disp.h,
-                      transform: imgTransform,
-                      filter: imgFilter,
-                      borderRadius: 1,
-                      boxShadow: ui.shadow.sm
-                    }
-                  : // 원본 크기 측정 전 폴백: CSS contain으로 화면 안에 가둔다
-                    {
-                      maxWidth: '100%',
-                      maxHeight: stage.h > 0 ? `${stage.h}px` : '100%',
-                      width: 'auto',
-                      height: 'auto',
-                      display: 'block',
-                      filter: imgFilter,
-                      borderRadius: 1,
-                      boxShadow: ui.shadow.sm
-                    }
-              }
-            />
+            {/* 이미지 박스 — 캔버스 크기 앵커 위치 (회전 반영 크기) */}
+            <Box sx={geo ? { position: 'absolute', left: geo.off.dx * scale, top: geo.off.dy * scale, width: geo.box.w * scale, height: geo.box.h * scale } : { position: 'relative' }}>
+              <Box
+                component="img"
+                src={displayUrl ?? undefined}
+                alt="미리보기"
+                draggable={false}
+                onLoad={(e: React.SyntheticEvent<HTMLImageElement>) => {
+                  const el = e.currentTarget
+                  // 픽셀 패스 결과(축소본)가 아니라 원본이 로드됐을 때만 원본 크기를 갱신
+                  if (el.src !== url) return
+                  if (el.naturalWidth && el.naturalHeight) setNat({ w: el.naturalWidth, h: el.naturalHeight })
+                }}
+                sx={
+                  geo
+                    ? {
+                        position: 'absolute',
+                        left: '50%',
+                        top: '50%',
+                        width: geo.eff.width * scale,
+                        height: geo.eff.height * scale,
+                        maxWidth: 'none',
+                        transform: imgTransform,
+                        filter: imgFilter,
+                        imageRendering: pixelated ? 'pixelated' : 'auto'
+                      }
+                    : // 원본 크기 측정 전 폴백: CSS contain으로 화면 안에 가둔다
+                      { maxWidth: '100%', maxHeight: stage.h > 0 ? `${stage.h}px` : '100%', display: 'block', filter: imgFilter }
+                }
+              />
+            </Box>
+            {grid && scale >= GRID_FROM && (
+              <Box
+                aria-hidden
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 2,
+                  pointerEvents: 'none',
+                  backgroundImage: 'linear-gradient(to right, rgba(128,128,128,.45) 1px, transparent 1px), linear-gradient(to bottom, rgba(128,128,128,.45) 1px, transparent 1px)',
+                  backgroundSize: `${scale}px ${scale}px`
+                }}
+              />
+            )}
             {loading && (
-              <Typography
-                variant="caption"
-                sx={{ position: 'absolute', top: 10, left: 10, zIndex: 4, bgcolor: 'rgba(255,255,255,.85)', borderRadius: 1, px: 0.8, py: 0.2, color: ui.gray[600] }}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: space.base,
+                  left: space.base,
+                  zIndex: 4,
+                  bgcolor: color.warningSubtle,
+                  border: `1px solid ${color.borderStrong}`,
+                  px: `${space.md}px`,
+                  lineHeight: '18px',
+                  fontSize: font.xs
+                }}
               >
                 불러오는 중…
-              </Typography>
+              </Box>
             )}
             {watermark?.enabled &&
               (hasCrop(crop) ? (
@@ -479,36 +701,12 @@ export function Preview({ source, watermark, transform, resize, crop = null, cro
               ) : (
                 <WatermarkOverlay wm={watermark} />
               ))}
-            {onCrop && <CropLayer crop={crop} active={cropMode} onCrop={onCrop} />}
+            {onCrop && paperPx && <CropLayer crop={crop} active={cropMode} onCrop={onCrop} aspect={cropAspect} frame={paperPx} />}
           </Box>
         ) : (
-          <Typography variant="caption" color="text.secondary" sx={{ m: 'auto' }}>
-            불러오는 중…
-          </Typography>
+          <Box sx={{ m: 'auto', color: color.textMuted }}>불러오는 중…</Box>
         )}
       </Box>
-
-      {count > 1 && (
-        <Stack direction="row" alignItems="center" justifyContent="center" spacing={0.6}>
-          <Tooltip title="이전 페이지">
-            <span>
-              <IconButton size="small" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
-                <ChevronLeftRounded />
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Typography sx={{ fontSize: 14.5, minWidth: 60, textAlign: 'center', color: ui.gray[600] }}>
-            {page + 1} / {count}
-          </Typography>
-          <Tooltip title="다음 페이지">
-            <span>
-              <IconButton size="small" disabled={page >= count - 1} onClick={() => setPage((p) => Math.min(count - 1, p + 1))}>
-                <ChevronRightRounded />
-              </IconButton>
-            </span>
-          </Tooltip>
-        </Stack>
-      )}
     </Box>
   )
-}
+})

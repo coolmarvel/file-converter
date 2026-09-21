@@ -11,4 +11,9 @@ export interface AppFile {
   previewUrl?: string
   /** 원래 포맷 (HEIC/TIFF는 추가 시점에 PNG로 풀어서 kind='png'가 되므로 배지 표시용으로 보관) */
   srcKind?: FileKind
+  /**
+   * 캐시 키 — 원근 보정(문서 펴기)이 걸린 파일은 bytes 가 펴진 결과로 바뀌므로, AI 배경 제거 같은
+   * 파일별 캐시가 옛 결과를 쓰지 않게 id 대신 이 키를 쓴다. 없으면 id.
+   */
+  cacheKey?: string
 }

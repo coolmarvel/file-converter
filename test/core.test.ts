@@ -37,7 +37,12 @@ test('저장용 대표 확장자', () => {
 })
 
 test('변환 경로: PDF는 이미지로, 이미지는 PDF/이미지 출력 포맷으로', () => {
-  assert.deepEqual(targetsFor('pdf').map((t) => t.to).sort(), ['jpeg', 'png', 'webp'])
+  assert.deepEqual(
+    targetsFor('pdf')
+      .map((t) => t.to)
+      .sort(),
+    ['jpeg', 'png', 'webp']
+  )
   const pngTargets = targetsFor('png').map((t) => t.to)
   assert.ok(pngTargets.includes('pdf'))
   for (const out of IMAGE_OUTPUTS) assert.ok(pngTargets.includes(out))
@@ -92,10 +97,7 @@ test('이미지→PDF는 여러 장 합치기(merges)', () => {
 
 test('BMP 인코더: 헤더·크기·픽셀(BGR, bottom-up, 행 패딩)', () => {
   // 2×2: 좌상 빨강, 우상 초록, 좌하 파랑, 우하 흰색
-  const rgba = new Uint8Array([
-    255, 0, 0, 255,   0, 255, 0, 255,
-    0, 0, 255, 255,   255, 255, 255, 255
-  ])
+  const rgba = new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255])
   const bmp = encodeBmp(2, 2, rgba)
   const view = new DataView(bmp.buffer)
   assert.equal(bmp[0], 0x42) // 'B'

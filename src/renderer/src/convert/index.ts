@@ -2,24 +2,11 @@
  * 변환 디스패처 — (원본 종류, 목표 종류)를 실제 구현 함수로 연결한다.
  * 새 변환을 붙일 땐 core/conversions.ts 에 경로를 추가하고 여기 분기 하나를 더한다.
  */
-import { FileKind, FORMATS, IMAGE_OUTPUTS, extFor } from '@core/index'
+import { FileKind, FORMATS, IMAGE_OUTPUTS, extFor, Adjustments, hasAdjust, CanvasSizeOptions, MatteRefine, hasMatteRefine, Filters, hasFilters, LayerEffects, hasEffects } from '@core/index'
 import { AppFile } from '../types'
 // pdf.js·pdf-lib는 무거워서 타입만 정적 참조 — 런타임은 해당 분기에서 지연 로딩
 import type { NamedBytes } from './pdf'
-import {
-  convertImageFormat,
-  convertImageToSvg,
-  convertImageToIco,
-  mimeFor,
-  ResizeOpts,
-  Transform,
-  hasTransform,
-  CropRect,
-  hasCrop,
-  supportsAlpha,
-  loadImageFromUrl,
-  ImageConvertOpts
-} from './image'
+import { convertImageFormat, convertImageToSvg, convertImageToIco, mimeFor, ResizeOpts, Transform, hasTransform, CropRect, hasCrop, loadImageFromUrl, ImageConvertOpts } from './image'
 import { WatermarkOpts } from '../watermark/model'
 import signUrl from '../assets/sign.png'
 
@@ -27,6 +14,8 @@ import signUrl from '../assets/sign.png'
 export interface BgOptions {
   mode: 'none' | 'white' | 'ai'
   tolerance: number // white 모드의 허용 오차 (0~100)
+  /** AI 모드의 가장자리 다듬기 (Compositor GuidedMatte 이식) */
+  matte: MatteRefine
 }
 
 export interface ConvertOptions {
@@ -34,6 +23,8 @@ export interface ConvertOptions {
   to: FileKind
   /** PDF→이미지 렌더링 배율 */
   scale?: number
+  /** PDF→이미지에서 이 페이지들만 (0-based, 내보내기 미리보기용). 없으면 전체 */
+  pageIndices?: number[]
   /** 이미지 출력 시 크기(px). 한쪽만 주면 비율 유지 */
   resize?: ResizeOpts
   /** 0~1. jpeg/webp 인코딩 품질 */
@@ -46,8 +37,22 @@ export interface ConvertOptions {
   bg?: BgOptions
   /** AI 배경 제거 선계산 결과 (fileId → PNG 바이트). 없으면 여기서 직접 돌린다 */
   aiCache?: Map<string, Uint8Array>
+  /** 보정 (Compositor 이식 — 레벨·커브·노출·색조/채도·그레인·반전·그라데이션 맵) */
+  adjust?: Adjustments | null
+  /** 필터 (가우시안·모션 블러·노이즈·렌즈 보정) */
+  filters?: Filters | null
+  /** 레이어 효과 (외곽선·그림자·색 덮기·안쪽 그림자 — 스티커·로고 윤곽선) */
+  effects?: LayerEffects | null
+  /** 캔버스 크기 (여백·정사각, 9방향 앵커) */
+  canvasSize?: CanvasSizeOptions | null
+  /** JPEG·BMP 처럼 투명을 못 담는 출력에서 투명 부분을 채울 색 */
+  matte?: string
+  /** 인쇄 해상도 — PNG/JPEG 에 새기고, 이미지→PDF 에서는 페이지 크기를 정한다 */
+  dpi?: number | null
   /** 출력에 워터마크 합성 */
   watermark?: WatermarkOpts
+  /** AI 가장자리 다듬기 계산 해상도 상한 (미리보기는 작게) — 기본 4096 */
+  matteLimit?: number
   /** 진행 표시 (done/total은 파일 단위, label은 현재 단계 설명) */
   onProgress?: (done: number, total: number, label?: string) => void
 }
@@ -74,14 +79,22 @@ export async function runConversion(files: AppFile[], opts: ConvertOptions): Pro
 
   /** 이미지 소스 바이트 (AI 배경 제거 모드면 제거된 PNG로 대체) */
   async function sourceOf(f: AppFile, idx: number): Promise<{ bytes: Uint8Array; mime: string }> {
-    if (opts.bg?.mode !== 'ai') return { bytes: f.bytes, mime: mimeFor(f.kind) }
-    const cached = opts.aiCache?.get(f.id)
-    if (cached) return { bytes: cached, mime: 'image/png' }
-    onProgress?.(idx, files.length, `AI 배경 제거 중… (${idx + 1}/${files.length})`)
-    const { removeBackgroundBytes } = await import('./bgremove')
-    const out = await removeBackgroundBytes(f.bytes, mimeFor(f.kind), (label) => onProgress?.(idx, files.length, label))
-    opts.aiCache?.set(f.id, out)
-    return { bytes: out, mime: 'image/png' }
+    const bg = opts.bg
+    if (bg?.mode !== 'ai') return { bytes: f.bytes, mime: mimeFor(f.kind) }
+    const key = f.cacheKey ?? f.id
+    let cut = opts.aiCache?.get(key)
+    if (!cut) {
+      onProgress?.(idx, files.length, `AI 배경 제거 중… (${idx + 1}/${files.length})`)
+      const { removeBackgroundBytes } = await import('./bgremove')
+      cut = await removeBackgroundBytes(f.bytes, mimeFor(f.kind), (label) => onProgress?.(idx, files.length, label))
+      opts.aiCache?.set(key, cut)
+    }
+    if (hasMatteRefine(bg.matte)) {
+      onProgress?.(idx, files.length, `가장자리 다듬는 중… (${idx + 1}/${files.length})`)
+      const { refineCutout } = await import('./matte')
+      cut = await refineCutout(cut, f.bytes, f.kind, bg.matte, opts.matteLimit ?? 4096)
+    }
+    return { bytes: cut, mime: 'image/png' }
   }
 
   const imageOpts: ImageConvertOpts = {
@@ -90,6 +103,12 @@ export async function runConversion(files: AppFile[], opts: ConvertOptions): Pro
     transform: opts.transform,
     crop: opts.crop,
     whiteTolerance,
+    adjust: opts.adjust,
+    filters: opts.filters,
+    effects: opts.effects,
+    canvasSize: opts.canvasSize,
+    matte: opts.matte,
+    dpi: opts.dpi,
     watermark: wm,
     sig
   }
@@ -101,13 +120,9 @@ export async function runConversion(files: AppFile[], opts: ConvertOptions): Pro
     for (let i = 0; i < files.length; i++) {
       onProgress?.(i, files.length, `변환 중… (${i + 1}/${files.length})`)
       const imgs = await pdfToImages(files[i].bytes, to, stripExt(files[i].name), {
+        ...imageOpts,
         scale: opts.scale ?? 2,
-        resize: opts.resize,
-        quality: opts.quality,
-        crop: opts.crop,
-        whiteTolerance,
-        watermark: wm,
-        sig
+        pageIndices: opts.pageIndices
       })
       results.push(...imgs)
     }
@@ -122,6 +137,10 @@ export async function runConversion(files: AppFile[], opts: ConvertOptions): Pro
     const needPre =
       hasTransform(opts.transform) ||
       hasCrop(opts.crop) ||
+      hasAdjust(opts.adjust) ||
+      hasFilters(opts.filters) ||
+      hasEffects(opts.effects) ||
+      !!opts.canvasSize ||
       opts.bg?.mode === 'ai' ||
       whiteTolerance != null ||
       !!(opts.resize && (opts.resize.width || opts.resize.height))
@@ -131,7 +150,7 @@ export async function runConversion(files: AppFile[], opts: ConvertOptions): Pro
       if (needPre) {
         const src = await sourceOf(files[i], i)
         sources.push({
-          bytes: await convertImageFormat(src.bytes, src.mime, 'png', { ...imageOpts, watermark: undefined, sig: undefined }),
+          bytes: await convertImageFormat(src.bytes, src.mime, 'png', { ...imageOpts, watermark: undefined, sig: undefined, dpi: undefined }),
           kind: 'png'
         })
       } else {
@@ -139,7 +158,7 @@ export async function runConversion(files: AppFile[], opts: ConvertOptions): Pro
       }
     }
     onProgress?.(files.length, files.length, 'PDF 생성 중…')
-    const pdf = await imagesToPdf(sources, wm, sig)
+    const pdf = await imagesToPdf(sources, wm, sig, opts.dpi)
     const name = files.length === 1 ? `${stripExt(files[0].name)}.pdf` : `묶음_${files.length}장.pdf`
     return [{ name, bytes: pdf }]
   }
