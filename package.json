@@ -1,6 +1,6 @@
 {
   "name": "file-converter",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "PDF·이미지 파일 변환기 — 오프라인 데스크톱 앱 (여러 파일 드롭 → 변환 대상 감지 → 미리보기 → 변환). PDF 편집은 pdf-editor, DICOM은 전용 변환기 프로젝트 담당",
   "author": "이성현",
   "license": "UNLICENSED",
@@ -25,8 +25,8 @@
   "dependencies": {
     "@emotion/react": "^11.13.5",
     "@emotion/styled": "^11.13.5",
-    "@imgly/background-removal": "^1.4.5",
-    "@imgly/background-removal-data": "^1.4.5",
+    "@imgly/background-removal": "1.4.5",
+    "@imgly/background-removal-data": "1.4.5",
     "@mui/icons-material": "^6.1.9",
     "@mui/material": "^6.1.9",
     "heic2any": "^0.0.4",

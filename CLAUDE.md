@@ -38,7 +38,7 @@
 - **PATCH**(1.0.**X**) — **기본값**. 수정/기능 하나 반영할 때마다 +1 (1.0.0 → 1.0.1 → 1.0.2 …).
 - **MINOR**(1.**X**.0) — 큰 기능 묶음을 한 번에 낼 때(판단). PATCH는 0으로.
 - **MAJOR**(**X**.0.0) — 대규모 재설계/호환 깨짐. 사용자와 상의.
-- 현재: **1.5.0** (2026-09-21 Compositor 2차 이식 — 원근 보정·효과·필터·내용 인식·채널 보정·클립보드. 단위 44·E2E 41 통과 — 설치 확인 대기).
+- 현재: **1.5.1** (2026-09-21 AI 배경 제거 1.4.5 정확 고정). 이전: **1.5.0** (2026-09-21 Compositor 2차 이식 — 원근 보정·효과·필터·내용 인식·채널 보정·클립보드. 단위 44·E2E 41 통과 — 설치 확인 대기).
 - ~~pdfguru 편집기 전체 구현 로드맵~~ → **2026-07-08 새 프로젝트 `/home/jace/pdf-editor` 로 분리·승계**
   (session-log 세션 5 참조). 이 프로젝트는 변환기로 유지, PDF 편집 요청은 pdf-editor에서 작업.
 - 매번 `package.json` version 올리고 → 인스톨러 파일명·changelog·session-log에 반영.
@@ -103,7 +103,7 @@ npm run dist:win     # → release/파일변환기-Setup-<version>.exe
 - **Compositor(MIT) 이식 순수 로직**(ADR-0008): `src/core/{imagesize,canvassize,adjust,matte,dpi,limits,filters,effects,perspective,contentfill}.ts` — 테스트 `test/compositor*.test.ts`.
   원근 보정은 파일별 소스 전처리(`App.effFiles`·`AppFile.cacheKey`), 필터·효과는 렌더 미리보기(`App` rendered + Preview `natOverride`)
   렌더 순서 SSOT = `docs/guides/conversion.md` §렌더 파이프라인
-- **AI 배경 제거 주의**: `@imgly/background-removal`은 **1.4.5 고정** — 모델 npm 패키지(background-removal-data)가 1.4.5까지만 존재(신버전은 자사 CDN 전용 = 오프라인 불가). 모델은 extraResources(bgrm-data)로 번들, main의 bgrm:// 프로토콜로 서빙, 렌더러 CSP에 bgrm:/unsafe-eval 허용 필요
+- **AI 배경 제거 주의**: `@imgly/background-removal`은 **1.4.5 고정**(package.json 도 `^` 없이 정확히 — v1.5.1) — 모델 npm 패키지(background-removal-data)가 1.4.5까지만 존재(신버전은 자사 CDN 전용 = 오프라인 불가). 모델은 extraResources(bgrm-data)로 번들, main의 bgrm:// 프로토콜로 서빙, 렌더러 CSP에 bgrm:/unsafe-eval 허용 필요
 - ~~PDF 주석 편집~~ → v1.0.5에서 제거, `~/pdf-editor` 프로젝트로 이관
 - 워터마크 모델·렌더: `src/renderer/src/watermark/model.ts` (guides/watermark.md). 변환 계층 3경로에 주입.
 - 설치 브랜딩/아이콘: `build/{icon.ico,icon.png,installerSidebar.bmp,installerHeader.bmp,uninstallerSidebar.bmp,license.txt}` + `package.json`(nsis, extraResources) + `src/main/index.ts`(BrowserWindow icon). 결정 ADR-0005.
